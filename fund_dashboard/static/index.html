@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thai Fund Dashboard — ข้อมูลกองทุนรวมไทยจาก SEC Open API</title>
+<meta name="description" content="Dashboard ติดตามกองทุนรวมไทย: NAV ล่าสุด ผลตอบแทน ความเสี่ยง พอร์ตการลงทุน และเปรียบเทียบระหว่างกองทุน ข้อมูลจาก SEC Open Data API">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>📊</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <b>Thai Fund Dashboard</b>
+    <span>SEC Open API Thailand</span>
+  </div>
+
+  <div class="searchbox">
+    <svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input id="search" type="search" autocomplete="off" spellcheck="false"
+           placeholder="ค้นหาด้วยรหัสกองทุน ชื่อกองทุน หรือ บลจ. เช่น K-ATECH, SCBNDQ" aria-label="ค้นหากองทุน">
+    <div class="suggest" id="suggest" hidden role="listbox"></div>
+  </div>
+
+  <div class="recent" id="recent"></div>
+  <button class="btn" id="browse-btn">รายชื่อกองทุน</button>
+</header>
+
+<main class="wrap">
+  <div id="alert" class="notice warn hidden" style="margin-top:16px"></div>
+
+  <!-- ---------- ส่วนหัวกองทุน + NAV ---------- -->
+  <section class="grid cols-main" style="margin-top:18px">
+    <div class="card" id="fund-head">
+      <div class="skeleton" style="width:120px;height:28px"></div>
+      <div class="skeleton" style="width:60%;height:26px;margin-top:12px"></div>
+      <div class="skeleton" style="width:40%;height:14px;margin-top:10px"></div>
+    </div>
+    <div class="card nav-hero" id="nav-card">
+      <div class="k">NAV ล่าสุด</div>
+      <div class="skeleton" style="width:70%;height:40px;margin-top:10px"></div>
+    </div>
+  </section>
+
+  <!-- ---------- ผลตอบแทนแต่ละช่วง ---------- -->
+  <div class="spacer"></div>
+  <section class="tiles" id="tiles"></section>
+
+  <!-- ---------- กราฟ + การ์ดขวา ---------- -->
+  <div class="spacer"></div>
+  <section class="grid cols-main">
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h2>กราฟ NAV ย้อนหลัง</h2>
+          <div class="sub" id="chart-sub">—</div>
+        </div>
+        <div class="range" id="range" role="group" aria-label="ช่วงเวลา">
+          <button data-range="1M">1M</button>
+          <button data-range="3M">3M</button>
+          <button data-range="6M">6M</button>
+          <button data-range="1Y" class="active">1Y</button>
+          <button data-range="3Y">3Y</button>
+          <button data-range="MAX">ทั้งหมด</button>
+        </div>
+      </div>
+
+      <div class="card-head" style="margin-bottom:10px">
+        <div class="legend" id="compare-chips"></div>
+        <div class="sub" id="chart-mode-note" style="margin:0"></div>
+      </div>
+
+      <div class="chart-wrap">
+        <svg class="chart" id="nav-chart" height="330" role="img" aria-label="กราฟ NAV ย้อนหลัง"></svg>
+        <div class="tooltip" id="chart-tip" hidden></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:8px">
+        <button class="btn" id="toggle-table" style="font-size:12px;padding:5px 10px">ดูเป็นตาราง</button>
+      </div>
+      <div class="table-scroll hidden" id="chart-table"></div>
+    </div>
+
+    <div class="grid" style="align-content:start">
+      <div class="card" id="calc-card"></div>
+      <div class="card" id="risk-card"></div>
+    </div>
+  </section>
+
+  <!-- ---------- ผลการดำเนินงานตาม factsheet + สถิติของ SEC ---------- -->
+  <h3 class="section-title">ผลการดำเนินงานและความเสี่ยง (ตาม Fund Factsheet ของ SEC)</h3>
+  <section class="grid cols-2">
+    <div class="card" id="perf-card"></div>
+    <div class="card" id="stat-card"></div>
+  </section>
+
+  <!-- ---------- พอร์ตการลงทุน ---------- -->
+  <h3 class="section-title">พอร์ตการลงทุน</h3>
+  <section class="grid cols-2">
+    <div class="card" id="alloc-card"></div>
+    <div class="card" id="top5-card"></div>
+  </section>
+
+  <!-- ---------- ค่าธรรมเนียม / เงื่อนไข / ข้อมูลทั่วไป ---------- -->
+  <h3 class="section-title">ค่าธรรมเนียม เงื่อนไขการซื้อขาย และข้อมูลกองทุน</h3>
+  <section class="grid cols-3">
+    <div class="card" id="fee-card"></div>
+    <div class="card" id="terms-card"></div>
+    <div class="card" id="profile-card"></div>
+  </section>
+
+  <!-- ---------- เปรียบเทียบกองทุน ---------- -->
+  <h3 class="section-title">เปรียบเทียบกับกองทุนอื่น</h3>
+  <section class="card" id="compare-card">
+    <div class="card-head">
+      <div>
+        <h2>ตารางเปรียบเทียบ</h2>
+        <div class="sub" id="compare-sub">พิมพ์รหัสกองทุนแล้วกด เพิ่ม เพื่อเทียบผลตอบแทนและความเสี่ยงในหน้าต่างเวลาเดียวกัน</div>
+      </div>
+      <div class="range" id="compare-range" role="group" aria-label="หน้าต่างเวลาเปรียบเทียบ">
+        <button data-window="3M">3M</button>
+        <button data-window="6M">6M</button>
+        <button data-window="1Y" class="active">1Y</button>
+        <button data-window="3Y">3Y</button>
+        <button data-window="5Y">5Y</button>
+      </div>
+    </div>
+    <div class="calc-row" style="max-width:520px">
+      <input id="compare-input" placeholder="เพิ่มรหัสกองทุน เช่น SCBSET50" aria-label="เพิ่มกองทุนที่จะเปรียบเทียบ">
+      <button class="btn primary" id="compare-add">เพิ่ม</button>
+    </div>
+    <div class="table-scroll" id="compare-table"></div>
+  </section>
+
+  <footer class="page-foot">
+    <div id="meta-line"></div>
+    <div>แหล่งข้อมูล: SEC Open Data API — <a href="https://secopendata.sec.or.th/" target="_blank" rel="noopener">secopendata.sec.or.th</a> (ต้องสมัครและขอ API Key ก่อนใช้งาน)</div>
+    <div>ผลตอบแทนและค่าความเสี่ยงบางส่วนคำนวณจาก NAV ย้อนหลังโดย dashboard นี้เอง อาจต่างจากตัวเลขใน factsheet ที่ บลจ. รายงาน · ผลการดำเนินงานในอดีตไม่ได้เป็นสิ่งยืนยันผลการดำเนินงานในอนาคต · ข้อมูลนี้เพื่อการศึกษา ไม่ใช่คำแนะนำการลงทุน</div>
+  </footer>
+</main>
+
+<!-- ---------- modal รายชื่อกองทุน ---------- -->
+<div class="modal" id="browse" hidden>
+  <div class="modal-card">
+    <div class="modal-head">
+      <b style="flex:0 0 auto">รายชื่อกองทุน</b>
+      <input id="browse-q" placeholder="ค้นหา" style="flex:1 1 200px">
+      <select id="browse-amc"><option value="">ทุก บลจ.</option></select>
+      <select id="browse-policy"><option value="">ทุกนโยบาย</option></select>
+      <button class="btn" id="browse-close">ปิด</button>
+    </div>
+    <div class="modal-body" id="browse-body"></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

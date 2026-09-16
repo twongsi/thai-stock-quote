@@ -1,2 +1,8 @@
 # VSCode
 .vscode
+
+# Thai Fund Dashboard
+fund_dashboard/.env
+fund_dashboard/cache/
+__pycache__/
+*.pyc
