@@ -4,6 +4,7 @@ Examples:
     python screener.py
     python screener.py --min-rsi 50 --above-sma 40 --sort ret_13w
     python screener.py --near-high 5 --min-volume 10000000 --top 10 --csv out.csv
+    python screener.py --consensus --min-upside 15 --min-analysts 5 --sort upside
 """
 import argparse
 import glob
@@ -13,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 DATA_DIR = 'data'
+CONSENSUS_COLUMNS = ['target_mean', 'upside', 'analysts', 'rating', 'rating_score']
 
 COLUMNS = ['ticker', 'date', 'close', 'ret_1w', 'ret_4w', 'ret_13w', 'ret_52w',
            'from_high_52w', 'from_low_52w', 'sma_10w', 'sma_40w', 'rsi_14',
@@ -69,6 +71,11 @@ def load_metrics(data_dir=DATA_DIR):
     return pd.DataFrame(rows, columns=COLUMNS)
 
 
+def add_consensus(metrics, path):
+    consensus = pd.read_csv(path, usecols=['ticker'] + CONSENSUS_COLUMNS)
+    return metrics.merge(consensus, on='ticker', how='left')
+
+
 def screen(metrics, args):
     m = metrics
     if args.min_price is not None:
@@ -95,6 +102,12 @@ def screen(metrics, args):
         m = m[m['close'] < m[f'sma_{weeks}w']]
     if args.golden_cross:
         m = m[m['sma_10w'] > m['sma_40w']]
+    if args.min_upside is not None:
+        m = m[m['upside'] >= args.min_upside]
+    if args.min_analysts is not None:
+        m = m[m['analysts'] >= args.min_analysts]
+    if args.max_rating_score is not None:
+        m = m[m['rating_score'] <= args.max_rating_score]
     m = m.sort_values(args.sort, ascending=args.asc, na_position='last')
     if args.top:
         m = m.head(args.top)
@@ -120,7 +133,15 @@ def parse_args():
     p.add_argument('--below-sma', type=int, choices=[10, 40], action='append',
                    help='close below the 10- or 40-week SMA (repeatable)')
     p.add_argument('--golden-cross', action='store_true', help='10-week SMA above 40-week SMA')
-    p.add_argument('--sort', default='ret_13w', choices=COLUMNS[2:])
+    p.add_argument('--consensus', nargs='?', const='consensus.csv', metavar='FILE',
+                   help='merge analyst consensus from analyst_consensus.py (default consensus.csv)')
+    p.add_argument('--min-upside', type=float,
+                   help='minimum upside to the mean target price, %% (needs --consensus)')
+    p.add_argument('--min-analysts', type=int, help='minimum analyst count (needs --consensus)')
+    p.add_argument('--max-rating-score', type=float,
+                   help='maximum mean rating, 1 = strong buy .. 5 = strong sell (needs --consensus)')
+    p.add_argument('--sort', default='ret_13w',
+                   choices=COLUMNS[2:] + [c for c in CONSENSUS_COLUMNS if c != 'rating'])
     p.add_argument('--asc', action='store_true', help='sort ascending (default descending)')
     p.add_argument('--top', type=int, help='show only the first N results')
     p.add_argument('--csv', help='also save the result to this CSV file')
@@ -129,7 +150,14 @@ def parse_args():
 
 def main():
     args = parse_args()
-    result = screen(load_metrics(args.data_dir), args)
+    needs_consensus = (args.min_upside, args.min_analysts, args.max_rating_score)
+    if args.consensus is None and (any(v is not None for v in needs_consensus)
+                                   or args.sort in CONSENSUS_COLUMNS):
+        raise SystemExit('Consensus filters and sorts need --consensus')
+    metrics = load_metrics(args.data_dir)
+    if args.consensus:
+        metrics = add_consensus(metrics, args.consensus)
+    result = screen(metrics, args)
     if args.csv:
         result.to_csv(args.csv, index=False)
     if result.empty:
