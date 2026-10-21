@@ -23,3 +23,5 @@ python screener.py --consensus --min-upside 15 --min-analysts 5 --above-sma 40 -
 ```
 
 `rating_score` runs from 1 (strong buy) to 5 (strong sell); `--max-rating-score 2` keeps buy-rated stocks. `upside` uses Yahoo's current price, so refresh `data/` with download.py before mixing it with the technical filters.
+
+test_sources.py -> check which SET data sources (Yahoo via yfinance, Settrade JSON API, set.or.th) are reachable from your network: `python test_sources.py PTT`
