@@ -18,3 +18,13 @@ def test_merge_prefers_new_rows_on_overlap():
     new = pd.DataFrame({'Date': pd.to_datetime(['2021-05-31', '2021-06-07']), 'Close': [2.5, 3.0]})
     out = merge(old, new)
     assert list(out['Close']) == [1.0, 2.5, 3.0]
+
+
+def test_to_weekly_aggregates_days_into_monday_weeks():
+    from download import to_weekly
+    days = pd.date_range('2024-01-08', periods=10, freq='B')   # two full weeks
+    daily = pd.DataFrame({'Open': range(10), 'High': range(10), 'Low': range(10),
+                          'Close': range(10), 'Adj Close': range(10), 'Volume': [1] * 10}, index=days)
+    w = to_weekly(daily)
+    assert list(w.index.strftime('%Y-%m-%d')) == ['2024-01-08', '2024-01-15']
+    assert list(w['Open']) == [0, 5] and list(w['Close']) == [4, 9] and list(w['Volume']) == [5, 5]

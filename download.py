@@ -41,12 +41,30 @@ def load_existing(path):
 
 
 def fetch(symbol, start):
-    raw = yf.Ticker(symbol).history(start=start, interval='1wk', auto_adjust=False, actions=False)
+    ticker = yf.Ticker(symbol)
+    raw = ticker.history(start=start, interval='1wk', auto_adjust=False, actions=False)
+    expected = (pd.Timestamp.now() - pd.Timestamp(start)).days // 7
+    if len(raw) < expected // 2:
+        # Yahoo sometimes returns only the latest weekly bar (seen for ^SET.BK);
+        # its daily history is complete, so build the weeks from that
+        daily = ticker.history(start=start, interval='1d', auto_adjust=False, actions=False)
+        if len(daily) > len(raw):
+            raw = to_weekly(daily)
     if raw.empty:
         return None
     raw = raw.reset_index()
     raw['Date'] = week_start(raw['Date'])
-    return raw[['Date'] + COLUMNS]
+    return raw.drop_duplicates('Date', keep='last')[['Date'] + COLUMNS]
+
+
+def to_weekly(daily):
+    daily = daily.copy()
+    daily.index = daily.index.tz_localize(None) if daily.index.tz is not None else daily.index
+    weekly = daily.resample('W-MON', label='left', closed='left').agg({
+        'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last',
+        'Adj Close': 'last', 'Volume': 'sum'}).dropna(subset=['Close'])
+    weekly.index.name = 'Date'
+    return weekly
 
 
 def merge(existing, new):
@@ -59,6 +77,8 @@ def merge(existing, new):
 
 def update(symbol, path, full=False):
     existing = None if full else load_existing(path)
+    if existing is not None and len(existing) < 52:
+        existing = None   # too short to extend; fetch the full history
     # Re-fetch the last few weeks so a partial week and late corrections are refreshed
     start = START_DATE if existing is None or existing.empty else \
         (existing['Date'].max() - pd.Timedelta(weeks=2)).strftime('%Y-%m-%d')
@@ -93,8 +113,6 @@ def main():
     else:
         with open('tickers.csv', newline='') as f:
             tickers = [t.strip() for t in list(csv.reader(f))[0] if t.strip()]
-
-    if not args.tickers:
         move_former_members(tickers)
 
     failed = []
