@@ -1,27 +1,56 @@
+"""Download the SET100 constituents from the SET website and save to tickers.csv.
+
+Uses the JSON endpoint behind https://www.set.or.th/en/market/index/set100/overview.
+The old Settrade page (C13_MarketSummary.jsp) no longer exists. If the
+request fails, tickers.csv is left unchanged.
+"""
 import csv
+import sys
+
 import requests
-from bs4 import BeautifulSoup
 
-URL = 'https://www.settrade.com/C13_MarketSummary.jsp?detail=SET100'
+URL = 'https://www.set.or.th/api/set/index/set100/composition'
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (thai-stock-quote research script)',
+    'Accept': 'application/json',
+    'Referer': 'https://www.set.or.th/en/market/index/set100/overview',
+}
 
-page = requests.get(URL)
-soup = BeautifulSoup(page.content, 'html.parser')
 
-def extract_ticker(s):
-    try:
-        no_front = s[60:]
-        no_front_no_back = no_front.split('" ')[0]
-        return no_front_no_back
-    except:
-        pass
+def extract_symbols(payload):
+    """Collect 'symbol' values from every stockInfos list in the response."""
+    symbols = []
 
-tickers = []
-for i in soup.find_all('a', class_='link-stt'):
-    if 'txtSymbol' in str(i):
-        ticker = extract_ticker(str(i))
-        tickers.append(ticker)
+    def walk(node):
+        if isinstance(node, dict):
+            for item in node.get('stockInfos') or []:
+                if isinstance(item, dict) and item.get('symbol'):
+                    symbols.append(item['symbol'].strip().upper())
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
 
-with open('tickers.csv', mode='w') as file:
-    writer = csv.writer(file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-    writer.writerow(tickers)
+    walk(payload)
+    return sorted(set(symbols))
 
+
+def main():
+    session = requests.Session()
+    session.headers.update(HEADERS)
+    # The API expects the cookies set by a normal page visit
+    session.get(HEADERS['Referer'], timeout=30)
+    resp = session.get(URL, params={'lang': 'en'}, timeout=30)
+    resp.raise_for_status()
+    tickers = extract_symbols(resp.json())
+    if not 90 <= len(tickers) <= 110:
+        sys.exit(f'expected about 100 symbols, got {len(tickers)}; tickers.csv not changed')
+
+    with open('tickers.csv', mode='w', newline='') as file:
+        csv.writer(file).writerow(tickers)
+    print(f'saved {len(tickers)} tickers to tickers.csv')
+
+
+if __name__ == '__main__':
+    main()
