@@ -1,3 +1,3 @@
-,CAGR,Volatility,Sharpe,MaxDrawdown,Weeks
+Strategy,CAGR,Volatility,Sharpe,MaxDrawdown,Weeks
 Momentum,0.1816,0.1862,0.8678,-0.3444,825.0000
 EqualWeight,0.1274,0.1720,0.6241,-0.3907,825.0000

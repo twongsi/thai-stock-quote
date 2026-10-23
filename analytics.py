@@ -272,7 +272,7 @@ def main():
     m.to_csv(f'{args.out}/metrics.csv', float_format='%.4f')
     scr.to_csv(f'{args.out}/screener.csv', float_format='%.4f')
     bt.to_csv(f'{args.out}/backtest_returns.csv', float_format='%.6f')
-    summary.to_csv(f'{args.out}/backtest_summary.csv', float_format='%.4f')
+    summary.to_csv(f'{args.out}/backtest_summary.csv', float_format='%.4f', index_label='Strategy')
 
     nav_out = (1 + bt.fillna(0)).cumprod()
     nav_out.index.name = 'Date'
