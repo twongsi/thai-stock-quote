@@ -88,8 +88,11 @@ def clean_prices(prices, window=9, max_ratio=1.8):
 def load_index(path='data/index/SET.csv'):
     if not os.path.exists(path):
         return None
-    df = pd.read_csv(path, parse_dates=['Date'])
-    return df.set_index('Date')['Adj Close'].rename('SET')
+    df = pd.read_csv(path, parse_dates=['Date']).drop_duplicates('Date', keep='last').set_index('Date')
+    s = df['Adj Close'] if df['Adj Close'].notna().any() else df['Close']
+    s = clean_prices(s.where(s > 0)).rename('SET')
+    print(f'SET index: {s.notna().sum()} weeks, {s.first_valid_index()} to {s.last_valid_index()}')
+    return s if s.notna().sum() > WEEKS_PER_YEAR else None
 
 
 # ---------- metrics ----------
@@ -232,6 +235,8 @@ def summarize(returns, rf=0.02):
     rows = {}
     for col in returns:
         r = returns[col].dropna()
+        if len(r) < WEEKS_PER_YEAR:
+            continue
         nav = (1 + r).cumprod()
         years = len(r) / WEEKS_PER_YEAR
         cagr = nav.iloc[-1] ** (1 / years) - 1
@@ -268,6 +273,10 @@ def main():
     scr.to_csv(f'{args.out}/screener.csv', float_format='%.4f')
     bt.to_csv(f'{args.out}/backtest_returns.csv', float_format='%.6f')
     summary.to_csv(f'{args.out}/backtest_summary.csv', float_format='%.4f')
+
+    nav_out = (1 + bt.fillna(0)).cumprod()
+    nav_out.index.name = 'Date'
+    nav_out.to_csv(f'{args.out}/backtest_nav.csv', float_format='%.4f', date_format='%Y-%m-%d')
 
     rets = adj.pct_change(fill_method=None)
     recent = rets.iloc[-3 * WEEKS_PER_YEAR:]

@@ -53,3 +53,9 @@ def test_dividend_yield_not_inflated_by_price_rally():
     factor = pd.Series(np.where(np.arange(60) < 30, 0.95, 1.0), index=idx)  # one 5.3% dividend
     adj = close * factor
     assert np.isclose(a.trailing_dividend_yield(adj, close), 1 / 0.95 - 1)
+
+
+def test_summarize_skips_short_or_empty_series():
+    idx = weekly(60)
+    r = pd.DataFrame({'A': 0.001, 'B': np.nan}, index=idx)
+    assert list(a.summarize(r).index) == ['A']
