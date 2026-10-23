@@ -1,7 +1,7 @@
 """Download weekly quotes for each ticker in tickers.csv from Yahoo Finance.
 
 Only new weeks are fetched when data/<TICKER>.csv already exists. The SET
-index (^SET.BI) is saved to data/index/SET.csv as a benchmark.
+index (^SET.BK) is saved to data/index/SET.csv as a benchmark.
 
     python download.py              # update everything
     python download.py PTT AOT      # update selected tickers
@@ -17,7 +17,7 @@ import yfinance as yf
 
 START_DATE = '2010-01-01'
 COLUMNS = ['High', 'Low', 'Open', 'Close', 'Volume', 'Adj Close']
-INDEX_SYMBOLS = {'SET': '^SET.BI'}
+INDEX_SYMBOLS = {'SET': '^SET.BK'}
 
 
 def week_start(dates):
@@ -71,6 +71,17 @@ def update(symbol, path, full=False):
     return len(new)
 
 
+def move_former_members(tickers, data_dir='data'):
+    """Keep data/ to current members; older files go to data/former/."""
+    current = set(tickers)
+    for name in sorted(os.listdir(data_dir)):
+        ticker, ext = os.path.splitext(name)
+        if ext == '.csv' and ticker not in current:
+            os.makedirs(os.path.join(data_dir, 'former'), exist_ok=True)
+            os.replace(os.path.join(data_dir, name), os.path.join(data_dir, 'former', name))
+            print(f'{ticker} left SET100 -> data/former/{name}')
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('tickers', nargs='*', help='default: all in tickers.csv')
@@ -82,6 +93,9 @@ def main():
     else:
         with open('tickers.csv', newline='') as f:
             tickers = [t.strip() for t in list(csv.reader(f))[0] if t.strip()]
+
+    if not args.tickers:
+        move_former_members(tickers)
 
     failed = []
     jobs = [(t + '.BK', f'data/{t}.csv') for t in tickers]

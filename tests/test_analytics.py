@@ -45,3 +45,11 @@ def test_screen_skips_missing_factors():
                      index=['A', 'B', 'C'])
     out = a.screen(m)
     assert list(out.index) == ['A', 'B', 'C']
+
+
+def test_dividend_yield_not_inflated_by_price_rally():
+    idx = weekly(60)
+    close = pd.Series(np.linspace(5, 15, 60), index=idx)   # price triples
+    factor = pd.Series(np.where(np.arange(60) < 30, 0.95, 1.0), index=idx)  # one 5.3% dividend
+    adj = close * factor
+    assert np.isclose(a.trailing_dividend_yield(adj, close), 1 / 0.95 - 1)

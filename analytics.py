@@ -19,7 +19,14 @@ WEEKS_PER_YEAR = 52
 
 # ---------- loading ----------
 
-def load_prices(data_dir='data', column='Adj Close'):
+def current_tickers(path='tickers.csv'):
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        return {t.strip() for t in f.read().split(',') if t.strip()}
+
+
+def load_prices(data_dir='data', column='Adj Close', tickers=None):
     """Wide DataFrame: index = week, columns = ticker.
 
     'Adj Close' is rebuilt from Close plus a capped dividend adjustment
@@ -28,6 +35,8 @@ def load_prices(data_dir='data', column='Adj Close'):
     series = {}
     for path in sorted(glob.glob(os.path.join(data_dir, '*.csv'))):
         ticker = os.path.splitext(os.path.basename(path))[0]
+        if tickers is not None and ticker not in tickers:
+            continue
         df = pd.read_csv(path, parse_dates=['Date']).drop_duplicates('Date', keep='last').set_index('Date')
         df = df.where(df > 0)
         close = clean_prices(df['Close'])
@@ -91,10 +100,15 @@ def max_drawdown(prices):
 
 
 def trailing_dividend_yield(adj, close, weeks=WEEKS_PER_YEAR):
-    """Approximate 12-month yield as total return minus price return."""
-    tr = adj.iloc[-1] / adj.iloc[-1 - weeks] - 1
-    pr = close.iloc[-1] / close.iloc[-1 - weeks] - 1
-    return tr - pr
+    """Dividends paid over 12 months as a share of the price on each ex-date.
+
+    Read from the growth of the Adj Close / Close factor. Total return minus
+    price return would overstate it for stocks whose price rose sharply.
+    """
+    factor = (adj / close).dropna()
+    if len(factor) <= weeks:
+        return np.nan
+    return factor.iloc[-1] / factor.iloc[-1 - weeks] - 1
 
 
 def momentum(prices, lookback=WEEKS_PER_YEAR, skip=4):
@@ -146,7 +160,7 @@ def screen(m, consensus=None, weights=None):
     weights = weights or {'Momentum12_1': 0.35, 'Volatility': -0.25, 'DividendYield1Y': 0.2, 'Upside': 0.2}
     df = m.copy()
     if consensus is not None:
-        df = df.join(consensus[['Upside']], how='left')
+        df = df.join(consensus, how='left')
     parts = []
     for col, w in weights.items():
         if col in df and df[col].notna().sum() > 2:
@@ -155,7 +169,12 @@ def screen(m, consensus=None, weights=None):
     return df.sort_values('Score', ascending=False)
 
 
-def load_latest_consensus(folder='data/consensus', upside_col=None):
+def load_latest_consensus(folder='data/consensus', upside_col=None, min_cover=3):
+    """Upside to the consensus target from the newest snapshot.
+
+    Upside is blanked for stocks covered by fewer than min_cover analysts,
+    whose consensus is one or two opinions.
+    """
     files = sorted(glob.glob(os.path.join(folder, '*.csv')))
     if not files:
         return None
@@ -164,7 +183,11 @@ def load_latest_consensus(folder='data/consensus', upside_col=None):
     if col is None:
         return None
     up = df[col]
-    return pd.DataFrame({'Upside': up / 100 if up.abs().median() > 1 else up})
+    out = pd.DataFrame({'Upside': up / 100 if up.abs().median() > 1 else up})
+    if 'Cover' in df:
+        out['Analysts'] = df['Cover']
+        out.loc[out['Analysts'] < min_cover, 'Upside'] = np.nan
+    return out
 
 
 # ---------- backtest ----------
@@ -228,8 +251,9 @@ def main():
     ap.add_argument('--out', default='reports')
     args = ap.parse_args()
 
-    adj = load_prices()
-    close = load_prices(column='Close')
+    tickers = current_tickers()
+    adj = load_prices(tickers=tickers)
+    close = load_prices(column='Close', tickers=tickers)
     m = metrics(adj, close, args.rf)
     scr = screen(m, load_latest_consensus())
 

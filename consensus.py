@@ -16,6 +16,7 @@ import argparse
 import csv
 import datetime as dt
 import os
+import re
 from io import StringIO
 
 import pandas as pd
@@ -63,6 +64,9 @@ def pick_table(tables, tickers, table_index=None, symbol_col=None):
     return tables[i], symbol_col or col
 
 
+SORT_MARKS = re.compile(r'\s*[\u2190-\u21ff\u25b2-\u25bf]+\s*')
+
+
 def clean(df, symbol_col):
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = [' '.join(str(p) for p in c if not str(p).startswith('Unnamed')).strip()
@@ -70,6 +74,8 @@ def clean(df, symbol_col):
         symbol_col = ' '.join(str(p) for p in symbol_col if not str(p).startswith('Unnamed')).strip() \
             if isinstance(symbol_col, tuple) else symbol_col
     df = df.rename(columns={symbol_col: 'Symbol'})
+    # Header cells carry sort arrows (e.g. 'Price ↕▾'); drop them from the names
+    df.columns = [SORT_MARKS.sub(' ', str(c)).strip() if c != 'Symbol' else c for c in df.columns]
     df['Symbol'] = df['Symbol'].astype(str).str.strip().str.upper()
     for col in df.columns.drop('Symbol'):
         text = df[col].astype(str).str.replace(',', '').str.replace('%', '').str.strip()

@@ -72,7 +72,7 @@ def report_html(html, base_url=''):
     for f in forms:
         print(f'  {f.get("method", "GET").upper()} {urljoin(base_url, f.get("action", ""))}')
         for inp in f.find_all(['input', 'select', 'textarea']):
-            opts = [o.get('value') for o in inp.find_all('option')][:10]
+            opts = [o.get('value', o.get_text(strip=True)) for o in inp.find_all('option')][:10]
             print(f'    {inp.name} name={inp.get("name")} type={inp.get("type")} value={inp.get("value")}'
                   + (f' options={opts}' if opts else ''))
 

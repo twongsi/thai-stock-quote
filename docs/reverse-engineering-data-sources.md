@@ -26,6 +26,21 @@ Worked target: analyst consensus at
 | 6. Binary payloads | Is the response Protobuf or another binary format? | [Protobuf Decoder](https://github.com/pawitp/protobuf-decoder) |
 | 7. Mobile apps | Does the broker app call an API the website doesn't? | HTTP Toolkit or mitmproxy with an Android device |
 
+## What we found on 9hoon (October 2026)
+
+The first run from GitHub Actions showed that `view_analyst_consensus.php` serves
+the whole table in its HTML, so `pandas.read_html` reads it without a browser. One
+row per stock, with these columns: market, sector, industry, price, market cap,
+P/E, P/BV, dividend %, `Cover` (number of analysts), Buy / Hold / Sell counts,
+recommendation, median and average target price, upside from the median, EPS and
+net profit forecasts for this year and next (Thai Buddhist years), and forward P/E.
+Header cells carry sort arrows, which `consensus.py` strips from the column names.
+
+The table itself does not name its source (the page footer was not checked). The analyst count and the Buy/Hold/Sell
+split look like a compilation of broker research (the same shape as the IAA
+Consensus on set.or.th). To check, compare a few stocks' median targets and
+analyst counts with the IAA figures on set.or.th.
+
 ## Deciding how to scrape
 
 - **The table is in the HTML** (`recon.py` shows the table and its header):
