@@ -21,7 +21,11 @@ jobs:
   update:
     runs-on: ubuntu-latest
     steps:
+      # Branch tip rather than the triggering commit, so a queued run sees the
+      # data the previous run committed
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -51,5 +55,5 @@ jobs:
             echo 'no changes'
           else
             git commit -m "Update data $(date -u +%Y-%m-%d)"
-            git push
+            git push || { git pull --rebase -X theirs && git push; }
           fi
