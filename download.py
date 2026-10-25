@@ -1,7 +1,7 @@
 """Download weekly quotes for each ticker in tickers.csv from Yahoo Finance.
 
 Only new weeks are fetched when data/<TICKER>.csv already exists. The SET
-index (^SET.BK) is saved to data/index/SET.csv as a benchmark.
+index (^SET.BK) and the TDEX SET50 ETF are saved to data/index/ as benchmarks.
 
     python download.py              # update everything
     python download.py PTT AOT      # update selected tickers
@@ -17,7 +17,9 @@ import yfinance as yf
 
 START_DATE = '2010-01-01'
 COLUMNS = ['High', 'Low', 'Open', 'Close', 'Volume', 'Adj Close']
-INDEX_SYMBOLS = {'SET': '^SET.BK'}
+# Yahoo has almost no history for ^SET.BK; TDEX (an ETF tracking the SET50)
+# has prices back to 2007 and stands in as the long-run benchmark
+INDEX_SYMBOLS = {'SET': '^SET.BK', 'TDEX': 'TDEX.BK'}
 
 
 def week_start(dates):

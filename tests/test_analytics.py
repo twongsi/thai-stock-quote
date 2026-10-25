@@ -59,3 +59,12 @@ def test_summarize_skips_short_or_empty_series():
     idx = weekly(60)
     r = pd.DataFrame({'A': 0.001, 'B': np.nan}, index=idx)
     assert list(a.summarize(r).index) == ['A']
+
+
+def test_load_benchmarks_skips_short_series(tmp_path):
+    long = pd.DataFrame({'Date': weekly(60), 'Close': np.linspace(1, 2, 60), 'Adj Close': np.linspace(1, 2, 60)})
+    short = long.head(1)
+    long.to_csv(tmp_path / 'TDEX.csv', index=False)
+    short.to_csv(tmp_path / 'SET.csv', index=False)
+    names = [s.name for s in a.load_benchmarks(str(tmp_path))]
+    assert names == ['TDEX']

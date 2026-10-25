@@ -43,6 +43,10 @@ jobs:
         continue-on-error: true
         run: python consensus.py
 
+      - name: Consensus changes
+        continue-on-error: true
+        run: python consensus_history.py
+
       - name: Reports
         run: python analytics.py
 
