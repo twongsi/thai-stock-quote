@@ -89,6 +89,8 @@ fund_dashboard/
 ├── catalog.py        # สร้างรายชื่อกองทุนทั้งหมด + ค่ากลางของกองกลุ่มเดียวกัน
 ├── demo_data.py      # ข้อมูลจำลองสำหรับโหมด --demo
 ├── selftest.py       # ทดสอบการดึงข้อมูลจริง + ตรวจโครงสร้าง API กับสเปกของ SEC
+├── build_static.py   # build เว็บ static (ไฟล์ JSON) สำหรับ deploy ขึ้น GitHub Pages
+├── watchlist.txt     # รายชื่อกองทุนที่จะ build ขึ้น Pages
 ├── server.py         # เว็บเซิร์ฟเวอร์ (stdlib) + REST API ของ dashboard
 └── static/           # หน้าเว็บ: index.html, styles.css, app.js (กราฟ SVG เขียนเอง)
 ```
@@ -108,7 +110,52 @@ fund_dashboard/
 
 เอาไปต่อยอดเป็น Excel/Power BI/Google Sheets ได้เลย เพราะทุก endpoint ตอบเป็น JSON
 
-## 5. หมายเหตุสำคัญ
+## 5. รันบน GitHub (ไม่ต้องเปิดคอมเองตลอด)
+
+### วิธีที่แนะนำ: GitHub Actions ดึงข้อมูล + GitHub Pages เสิร์ฟหน้าเว็บ (ฟรี)
+
+```
+GitHub Actions (ตามเวลาที่ตั้งไว้)          GitHub Pages
+  ├─ อ่าน SEC_API_KEY จาก Secrets    →   เว็บ static อ่านไฟล์ JSON
+  ├─ ดึงข้อมูลจาก SEC Open API            ไม่มีการเรียก SEC API จากเบราว์เซอร์
+  └─ build เป็นไฟล์ JSON + หน้าเว็บ        จึงไม่เปิด API Key ให้ใครเห็น
+```
+
+ตั้งค่าครั้งเดียว:
+
+1. **ใส่ API Key เป็น Secret** — Settings → Secrets and variables → Actions → New repository secret
+   ชื่อ `SEC_API_KEY` ค่าคือ key จาก SEC *(ห้าม commit key ลงโค้ดหรือไฟล์ `.env` เด็ดขาด)*
+2. **เปิด Pages** — Settings → Pages → Source เลือก **GitHub Actions**
+3. **เลือกกองทุนที่อยากติดตาม** — แก้ไฟล์ `fund_dashboard/watchlist.txt` (บรรทัดละ 1 กอง)
+4. กด Run workflow ที่แท็บ Actions หรือรอรอบถัดไป (workflow ตั้งไว้ 20:30 น. เวลาไทย จันทร์–ศุกร์)
+
+เสร็จแล้วจะได้ลิงก์ `https://<ชื่อผู้ใช้>.github.io/<ชื่อ repo>/` เอาไปแชร์ได้เลย
+ถ้ายังไม่ได้ใส่ secret workflow จะ build ด้วยข้อมูลจำลองให้ดูหน้าตาก่อน
+
+สร้างไฟล์เองในเครื่องก็ได้ (ไว้ทดสอบก่อน push):
+
+```bash
+python3 build_static.py --demo --out ../site     # ข้อมูลจำลอง
+python3 build_static.py --out ../site            # ข้อมูลจริง
+python3 -m http.server 8080 --directory ../site  # เปิด http://127.0.0.1:8080
+```
+
+**ข้อจำกัดของเวอร์ชัน static**: มีข้อมูลเฉพาะกองทุนที่อยู่ใน `watchlist.txt` (ค้นกองอื่นไม่ได้
+เพราะไม่มี backend คอยยิง API ให้) และข้อมูลใหม่ตามรอบที่ workflow รัน ไม่ใช่เรียลไทม์
+ขนาดไฟล์ราว 65 KB ต่อกอง (NAV ย้อนหลัง 5 ปี) — 6 กองประมาณ 400 KB
+
+### วิธีอื่น
+
+| วิธี | เหมาะกับ | ข้อสังเกต |
+|---|---|---|
+| **GitHub Codespaces** | อยากได้ของเต็ม (ค้นได้ทุกกอง) โดยไม่ลงอะไรในเครื่อง | เปิด Codespace → `cd fund_dashboard && python3 server.py` → กด Open in Browser ที่พอร์ต 8765 · ใส่ key ไว้ที่ Codespaces secrets · ใช้ได้เฉพาะตอนเปิด Codespace และมีโควตาชั่วโมงฟรีจำกัด |
+| **โฮสต์ที่อื่นโดย deploy จาก repo นี้** (Render / Railway / Fly.io) | อยากได้เว็บที่ค้นได้ทุกกอง เปิดได้ตลอด | รันคำสั่ง `python3 fund_dashboard/server.py --host 0.0.0.0 --port $PORT` ใส่ `SEC_API_KEY` เป็น environment variable ของบริการนั้น · ควรใส่การจำกัดการเข้าถึงด้วย เพราะทุกคนที่เปิดเว็บจะใช้โควตา API ของเรา |
+| **GitHub Pages อย่างเดียว (ไม่มี Actions)** | — | ไม่แนะนำ: ต้องให้เบราว์เซอร์ยิง SEC API ตรง ๆ ซึ่งแปลว่า API Key จะอยู่ในหน้าเว็บให้ใครก็เห็น และมีโอกาสติด CORS |
+
+> ก่อนเผยแพร่ข้อมูลกองทุนขึ้นเว็บสาธารณะ ควรอ่านเงื่อนไขการใช้ข้อมูลของ SEC Open Data
+> และให้เครดิตแหล่งข้อมูลไว้บนหน้าเว็บ (หน้านี้ใส่ไว้ที่ footer ให้แล้ว)
+
+## 6. หมายเหตุสำคัญ
 
 - **cache**: ผลลัพธ์จาก SEC API ถูก cache ลง `fund_dashboard/cache/` (NAV 6 ชม., factsheet 24 ชม.)
   ลบทิ้งได้ถ้าอยากดึงใหม่ทั้งหมด — โฟลเดอร์นี้และไฟล์ `.env` ไม่ถูก commit ขึ้น git
@@ -123,7 +170,7 @@ fund_dashboard/
 - **ผลการดำเนินงานในอดีตไม่ได้เป็นสิ่งยืนยันผลการดำเนินงานในอนาคต** — โปรเจกต์นี้ทำเพื่อการศึกษา
   ไม่ใช่คำแนะนำการลงทุน และไม่ได้มีความเกี่ยวข้องกับสำนักงาน ก.ล.ต.
 
-## 6. ปัญหาที่เจอบ่อย
+## 7. ปัญหาที่เจอบ่อย
 
 | อาการ | สาเหตุ / วิธีแก้ |
 |---|---|

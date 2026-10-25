@@ -74,13 +74,117 @@ const state = {
   browse: null,
 };
 
+/* โหมดการทำงาน 2 แบบ
+   - server : มี backend ของ Python (python3 server.py) -> เรียก /api/*
+   - static : เว็บที่ build ไว้ล่วงหน้า เช่นบน GitHub Pages -> อ่าน data/*.json ที่ GitHub Actions สร้างไว้ */
+const STATIC = { enabled: false, meta: null, index: [], bundles: new Map() };
+
+const assetUrl = (path) => new URL(String(path).replace(/^\//, ''), document.baseURI);
+
+async function fetchJson(path) {
+  const res = await fetch(assetUrl(path));
+  if (!res.ok) throw new Error(`โหลด ${path} ไม่สำเร็จ (${res.status})`);
+  return res.json();
+}
+
 async function api(path, params = {}) {
-  const url = new URL(path, location.origin);
+  if (STATIC.enabled) return staticApi(path, params);
+  const url = assetUrl(path);
   Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v); });
   const res = await fetch(url);
   const data = await res.json();
   if (data.error) throw new Error(data.error);
   return data;
+}
+
+function staticEntry(code) {
+  const needle = String(code || '').toUpperCase();
+  return STATIC.index.find((f) => (f.display_code || '').toUpperCase() === needle)
+    || STATIC.index.find((f) => (f.code || '').toUpperCase() === needle)
+    || STATIC.index.find((f) => (f.display_code || '').toUpperCase().startsWith(needle))
+    || STATIC.index.find((f) => `${f.name_th} ${f.name_en}`.toUpperCase().includes(needle));
+}
+
+async function staticBundle(code) {
+  const entry = staticEntry(code);
+  if (!entry) {
+    throw new Error(`เว็บเวอร์ชันนี้มีข้อมูลเฉพาะกองทุนที่เตรียมไว้ล่วงหน้า (${STATIC.index.length} กอง) — ไม่พบ '${code}'`);
+  }
+  if (!STATIC.bundles.has(entry.file)) STATIC.bundles.set(entry.file, await fetchJson(entry.file));
+  return STATIC.bundles.get(entry.file);
+}
+
+/** จำลอง REST API ของ backend จากไฟล์ที่ build ไว้ เพื่อให้โค้ดส่วนแสดงผลใช้ร่วมกันได้ทั้งสองโหมด */
+async function staticApi(path, params) {
+  if (path === '/api/meta') return STATIC.meta;
+
+  if (path === '/api/search') {
+    const needle = (params.q || '').toUpperCase();
+    return {
+      results: STATIC.index
+        .filter((f) => `${f.display_code} ${f.code} ${f.name_th} ${f.name_en} ${f.amc_th}`.toUpperCase().includes(needle))
+        .map((f) => ({ ...f, code: f.display_code, classes: [f.display_code] })),
+      source: 'static',
+    };
+  }
+
+  if (path === '/api/funds') {
+    const needle = (params.q || '').toUpperCase();
+    const amc = params.amc || '';
+    const policy = params.policy || '';
+    const funds = STATIC.index
+      .filter((f) => !needle || `${f.display_code} ${f.name_th} ${f.name_en} ${f.amc_th}`.toUpperCase().includes(needle))
+      .filter((f) => !amc || f.amc_th === amc)
+      .filter((f) => !policy || f.policy === policy)
+      .map((f) => ({ ...f, code: f.display_code, classes: [f.display_code] }));
+    return {
+      available: true,
+      generated_at: STATIC.meta.generated_at,
+      total: funds.length,
+      funds,
+      amcs: [...new Set(STATIC.index.map((f) => f.amc_th).filter(Boolean))].sort(),
+      policies: [...new Set(STATIC.index.map((f) => f.policy).filter(Boolean))].sort(),
+    };
+  }
+
+  if (path === '/api/fund') return staticBundle(params.class || params.code);
+
+  if (path === '/api/compare') {
+    const window = (params.window || '1Y').toUpperCase();
+    const codes = String(params.codes || '').split(',').map((c) => c.trim()).filter(Boolean);
+    const funds = [];
+    const errors = [];
+    for (const code of codes) {
+      try {
+        const bundle = await staticBundle(code);
+        const w = (bundle.windows || {})[window];
+        if (!w) { errors.push({ code, error: `ไม่มีข้อมูลในช่วง ${window}` }); continue; }
+        funds.push({
+          code: bundle.code,
+          class_name: bundle.class_name,
+          name_th: bundle.general.name_th,
+          window_return: w.return,
+          latest_nav: bundle.latest_nav.nav,
+          latest_date: bundle.latest_nav.nav_date,
+          periods: Object.fromEntries((bundle.summary.periods || []).map((p) => [p.period, { return: p.return, annualized: p.annualized }])),
+          risk: { volatility: w.volatility, max_drawdown: w.max_drawdown, sharpe: w.sharpe },
+          _window: w,
+        });
+      } catch (err) {
+        errors.push({ code, error: err.message });
+      }
+    }
+    funds.sort((a, b) => (b.window_return ?? -Infinity) - (a.window_return ?? -Infinity));
+    return {
+      window,
+      start_date: funds.length ? funds[0]._window.start_date : null,
+      end_date: funds.length ? funds[0]._window.end_date : null,
+      funds,
+      errors,
+    };
+  }
+
+  throw new Error(`static mode ไม่รองรับ ${path}`);
 }
 
 function showAlert(message, kind = 'warn') {
@@ -826,6 +930,21 @@ function renderBrowseTable(funds) {
     </tr>`).join('')}</tbody></table></div>`;
 }
 
+/** ลองคุยกับ backend ก่อน ถ้าไม่มี (เช่นเปิดจาก GitHub Pages) ให้สลับไปอ่านไฟล์ที่ build ไว้ */
+async function detectMode() {
+  if (document.body.dataset.mode !== 'static') try {
+    const res = await fetch(assetUrl('/api/meta'));
+    if (res.ok) {
+      const data = await res.json();
+      if (!data.error) return data;
+    }
+  } catch { /* ไม่มี backend — ถือว่าเป็นเว็บ static */ }
+  STATIC.enabled = true;
+  STATIC.meta = await fetchJson('data/meta.json');
+  STATIC.index = await fetchJson('data/index.json');
+  return STATIC.meta;
+}
+
 // ---------------------------------------------------------------- init
 async function init() {
   initSearch();
@@ -864,19 +983,25 @@ async function init() {
   window.addEventListener('resize', () => { clearTimeout(window.__rz); window.__rz = setTimeout(renderChart, 150); });
 
   try {
-    state.meta = await api('/api/meta');
+    state.meta = await detectMode();
     const m = state.meta;
-    $('#meta-line').innerHTML = `ข้อมูล NAV ย้อนหลัง ${m.history_years} ปี · `
-      + (m.catalog.available ? `รายชื่อกองทุนในเครื่อง ${num(m.catalog.count, 0)} กอง (${thaiDate(m.catalog.generated_at)})` : 'ยังไม่ได้สร้างรายชื่อกองทุนในเครื่อง — รัน python3 catalog.py --build')
-      + (m.peers.available ? ` · ค่ากลางกลุ่มเดียวกัน ${m.peers.groups} กลุ่ม` : '');
+    $('#meta-line').innerHTML = STATIC.enabled
+      ? `ข้อมูล NAV ย้อนหลัง ${m.history_years} ปี · ${num(m.fund_count, 0)} กองทุนที่เตรียมไว้ · อัปเดตล่าสุด ${thaiDate(m.generated_at)}`
+      : `ข้อมูล NAV ย้อนหลัง ${m.history_years} ปี · `
+        + (m.catalog.available ? `รายชื่อกองทุนในเครื่อง ${num(m.catalog.count, 0)} กอง (${thaiDate(m.catalog.generated_at)})` : 'ยังไม่ได้สร้างรายชื่อกองทุนในเครื่อง — รัน python3 catalog.py --build')
+        + (m.peers.available ? ` · ค่ากลางกลุ่มเดียวกัน ${m.peers.groups} กลุ่ม` : '');
     if (m.demo) {
       showAlert('<b>โหมดสาธิต</b> — ตัวเลขทั้งหมดเป็นข้อมูลจำลอง ไม่ใช่ข้อมูลจริงของกองทุน ใส่ SEC_API_KEY ในไฟล์ .env แล้วรัน <code>python3 server.py</code> เพื่อดูข้อมูลจริง');
+    }
+    if (m.failures && m.failures.length) {
+      showAlert(`กองทุนที่อัปเดตไม่สำเร็จในรอบล่าสุด: ${m.failures.map((f) => esc(f.code)).join(', ')}`);
     }
   } catch (err) {
     showAlert(`เชื่อมต่อ backend ไม่ได้: ${esc(err.message)}`, 'err');
   }
 
-  const initial = decodeURIComponent((location.hash || '').replace('#', '')) || 'SCBNDQ';
+  const fallback = (state.meta && state.meta.default_code) || 'SCBNDQ';
+  const initial = decodeURIComponent((location.hash || '').replace('#', '')) || fallback;
   loadFund(initial);
 }
 

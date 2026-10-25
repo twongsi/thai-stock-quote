@@ -18,6 +18,10 @@ python3 server.py --demo # ลองดูหน้าตาก่อนโด�
 ใช้ Python standard library ล้วน ไม่ต้องติดตั้ง package เพิ่ม — รายละเอียดทั้งหมดอยู่ใน
 [fund_dashboard/README.md](fund_dashboard/README.md)
 
+รันบน GitHub ได้โดยไม่ต้องเปิดคอมเองตลอด: workflow `.github/workflows/fund-dashboard.yml`
+จะให้ GitHub Actions ดึงข้อมูล (API Key เก็บใน repository secret ชื่อ `SEC_API_KEY`)
+แล้ว deploy หน้าเว็บขึ้น GitHub Pages ให้อัตโนมัติ — วิธีตั้งค่าอยู่ในหัวข้อ "รันบน GitHub" ของ README ด้านใน
+
 ## สคริปต์ข้อมูลหุ้น (ของเดิม)
 
 - `get_tickers.py` — ดึงรายชื่อหุ้น SET100 จาก Settrade เก็บลง `tickers.csv`
