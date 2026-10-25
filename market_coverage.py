@@ -130,6 +130,12 @@ def main():
         print(f'{market}: {len(mine)} securities by type: '
               + ', '.join(f'{k}={v}' for k, v in mine['security_type'].fillna('none').value_counts().items()))
     universe = common_stocks(rows, args.markets)
+    for market, g in universe.groupby('market'):
+        print(f'{market} type S by sector: '
+              + ', '.join(f'{k}={v}' for k, v in g['sector'].fillna('none').value_counts().items()))
+        funds = g[g['sector'].fillna('').str.upper().str.contains('REIT|PF|FUND|INFRA')]
+        if len(funds):
+            print(f'  funds/REITs ({len(funds)}): {", ".join(funds["symbol"])}')
     print(f'{len(universe)} common stocks to check')
     if universe.empty:
         sys.exit('no common stocks found in the stock list')
