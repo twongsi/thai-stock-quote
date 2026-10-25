@@ -70,6 +70,7 @@ const state = {
   range: '1Y',
   window: '1Y',
   showTable: false,
+  loadingCompare: null,   // รหัสกองที่กำลังดึงข้อมูลมาเทียบ
   browse: null,
 };
 
@@ -379,6 +380,9 @@ function renderCompareChips() {
     chips.push(`<span class="item"><span class="key" style="background:${SERIES_COLORS[(i + 1) % SERIES_COLORS.length]}"></span>${esc(displayCode(fund))}
       <button class="btn" data-remove="${esc(fund.code)}" style="padding:1px 6px;font-size:11px;line-height:1.3">✕</button></span>`);
   });
+  if (state.loadingCompare) {
+    chips.push(`<span class="item muted">กำลังโหลด ${esc(state.loadingCompare)} …</span>`);
+  }
   const box = $('#compare-chips');
   box.innerHTML = `<span class="sub" style="margin:0">เลือกกองที่จะเปรียบเทียบ</span>${chips.join('')}`
     + '<span class="item"><input id="chart-compare-input" class="chip mono" style="width:150px;padding:4px 10px" placeholder="+ เพิ่มรหัสกองทุน" aria-label="เพิ่มกองทุนที่จะเปรียบเทียบบนกราฟ"></span>';
@@ -665,14 +669,18 @@ async function addCompare(code) {
   if (state.compare.length >= 7) { showAlert('เปรียบเทียบได้สูงสุด 8 กองทุนพร้อมกัน'); return; }
   const primary = displayCode(state.fund).toUpperCase();
   if (code.toUpperCase() === primary || state.compare.some((f) => f.code.toUpperCase() === code.toUpperCase())) return;
+  state.loadingCompare = code;
+  renderCompareChips();
   try {
     const data = await api('/api/fund', { code });
     state.compare.push({ code: data.code, class_name: data.class_name, name_th: data.general.name_th, history: data.history });
-    renderChart();
-    loadCompareTable();
     hideAlert();
   } catch (err) {
     showAlert(esc(err.message), 'err');
+  } finally {
+    state.loadingCompare = null;
+    renderChart();
+    loadCompareTable();
   }
 }
 
