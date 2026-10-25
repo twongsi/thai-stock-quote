@@ -70,3 +70,35 @@ def test_consensus_filters(market):
 def test_consensus_filter_needs_flag(market):
     with pytest.raises(SystemExit):
         screener.parse_args(['--min-upside', '10'])
+
+
+def test_universe_all_joins_symbols_and_filters_by_market(tmp_path):
+    prices = tmp_path / 'market' / 'prices'
+    prices.mkdir(parents=True)
+    write_prices(prices, 'PTT', np.linspace(10, 20, 60))
+    write_prices(prices, 'AU', np.linspace(10, 20, 60))
+    write_prices(prices, 'CPNREIT', np.linspace(10, 20, 60))
+    write_prices(prices, 'OLD', np.linspace(10, 20, 60))     # delisted: not in symbols.csv
+    pd.DataFrame({'symbol': ['PTT', 'AU', 'CPNREIT'], 'market': ['SET', 'mai', 'SET'],
+                  'kind': ['company', 'company', 'fund'], 'sector': ['ENERG', None, 'PF&REIT']}).to_csv(
+        tmp_path / 'market' / 'symbols.csv', index=False)
+    old = screener.UNIVERSES['all']
+    screener.UNIVERSES['all'] = (str(prices), str(tmp_path / 'market' / 'consensus'),
+                                 str(tmp_path / 'market' / 'symbols.csv'))
+    try:
+        def run_all(*argv):
+            args = screener.parse_args(['--universe', 'all', *argv])
+            m = screener.load_symbols(args.symbols).merge(screener.load_metrics(args.data_dir), on='ticker')
+            return sorted(screener.screen(m, args)['ticker'])
+        assert run_all() == ['AU', 'CPNREIT', 'PTT']
+        assert run_all('--market', 'MAI') == ['AU']
+        assert run_all('--market', 'set', '--kind', 'company') == ['PTT']
+        assert run_all('--sector', 'pf&reit') == ['CPNREIT']
+        assert run_all('--min-value', '1000') == []          # 1e6 shares x ~20 baht = ~20 MB a week
+    finally:
+        screener.UNIVERSES['all'] = old
+
+
+def test_market_filters_need_universe_all():
+    with pytest.raises(SystemExit):
+        screener.parse_args(['--market', 'mai'])

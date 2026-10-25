@@ -1,13 +1,16 @@
 """Filter SET100 stocks by technical indicators and 9hoon analyst consensus.
 
-Reads the weekly quotes in data/ (download.py) and, with --consensus, the newest
-snapshot in data/consensus/ (consensus.py). analytics.py ranks stocks by a fixed
-factor score; this script is for ad-hoc filters.
+Reads the weekly quotes in data/ (SET100, download.py) or, with --universe all,
+data/market/ (every SET and mai stock, market_download.py). With --consensus it
+adds the newest 9hoon snapshot (consensus.py). analytics.py ranks stocks by a
+fixed factor score; this script is for ad-hoc filters.
 
     python screener.py
     python screener.py --min-rsi 50 --above-sma 40 --golden-cross --near-high 5
     python screener.py --consensus --min-upside 15 --min-analysts 5 --rating Buy --sort upside
     python screener.py --consensus --max-pe 15 --min-div 4 --sort div_yield --csv value.csv
+    python screener.py --universe all --market mai --kind company --min-value 5 --above-sma 40
+    python screener.py --universe all --consensus --min-upside 20 --sector BANK --sector FIN
 """
 import argparse
 import glob
@@ -21,10 +24,17 @@ from consensus_history import pick_columns
 
 DATA_DIR = 'data'
 CONSENSUS_DIR = 'data/consensus'
+MARKET_DIR = 'data/market'
+UNIVERSES = {
+    # universe: (price folder, consensus folder, symbols file)
+    'set100': (DATA_DIR, CONSENSUS_DIR, None),
+    'all': (os.path.join(MARKET_DIR, 'prices'), os.path.join(MARKET_DIR, 'consensus'),
+            os.path.join(MARKET_DIR, 'symbols.csv')),
+}
 
 COLUMNS = ['ticker', 'date', 'close', 'ret_1w', 'ret_4w', 'ret_13w', 'ret_52w',
            'from_high_52w', 'from_low_52w', 'sma_10w', 'sma_40w', 'rsi_14',
-           'volatility', 'avg_volume']
+           'volatility', 'avg_volume', 'avg_value_mb']
 CONSENSUS_COLUMNS = ['median_target', 'upside', 'analysts', 'rating', 'pe', 'pbv', 'div_yield']
 # 9hoon's trailing ratios; the forward P/E columns (P/E 2569F) are left out
 FUNDAMENTALS = {'pe': 'p/e', 'pbv': 'p/bv', 'div_yield': '%div.'}
@@ -67,6 +77,8 @@ def compute_metrics(ticker, df):
         # annualised from weekly returns
         'volatility': weekly_returns.std() * np.sqrt(52) * 100,
         'avg_volume': df['Volume'].tail(10).mean(),
+        # average weekly traded value, million baht
+        'avg_value_mb': (df['Close'] * df['Volume']).tail(10).mean() / 1e6,
     }
 
 
@@ -80,6 +92,12 @@ def load_metrics(data_dir=DATA_DIR):
             continue
         rows.append(compute_metrics(ticker, df))
     return pd.DataFrame(rows, columns=COLUMNS)
+
+
+def load_symbols(path):
+    """Market, kind and sector of each stock (data/market/symbols.csv)."""
+    df = pd.read_csv(path)
+    return df.rename(columns={'symbol': 'ticker'})[['ticker', 'market', 'kind', 'sector']]
 
 
 def latest_snapshot(path=CONSENSUS_DIR):
@@ -110,6 +128,14 @@ def load_consensus(path=CONSENSUS_DIR):
 
 def screen(metrics, args):
     m = metrics
+    if args.market:
+        m = m[m['market'].str.lower() == args.market.lower()]
+    if args.kind:
+        m = m[m['kind'] == args.kind]
+    if args.sector:
+        m = m[m['sector'].fillna('').str.upper().isin({x.upper() for x in args.sector})]
+    if args.min_value is not None:
+        m = m[m['avg_value_mb'] >= args.min_value]
     if args.min_price is not None:
         m = m[m['close'] >= args.min_price]
     if args.max_price is not None:
@@ -154,11 +180,22 @@ def screen(metrics, args):
 
 
 CONSENSUS_FILTERS = ('min_upside', 'min_analysts', 'rating', 'max_pe', 'max_pbv', 'min_div')
+MARKET_FILTERS = ('market', 'kind', 'sector')
 
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument('--data-dir', default=DATA_DIR)
+    p.add_argument('--universe', choices=list(UNIVERSES), default='set100',
+                   help='set100: data/ (default); all: every SET and mai stock in data/market/')
+    p.add_argument('--data-dir', help='price folder (default: from --universe)')
+    p.add_argument('--market', choices=['SET', 'mai'], type=lambda v: 'mai' if v.lower() == 'mai' else v.upper(),
+                   help='SET or mai (needs --universe all)')
+    p.add_argument('--kind', choices=['company', 'fund'],
+                   help='company, or fund for property funds/REITs (needs --universe all)')
+    p.add_argument('--sector', action='append', metavar='SECTOR',
+                   help='SET sector code, e.g. BANK, ENERG, PF&REIT (repeatable; needs --universe all)')
+    p.add_argument('--min-value', type=float, metavar='MB',
+                   help='minimum average weekly traded value, million baht')
     p.add_argument('--min-price', type=float)
     p.add_argument('--max-price', type=float)
     p.add_argument('--min-rsi', type=float, help='minimum 14-week RSI')
@@ -175,9 +212,9 @@ def parse_args(argv=None):
     p.add_argument('--below-sma', type=int, choices=[10, 40], action='append',
                    help='close below the 10- or 40-week SMA (repeatable)')
     p.add_argument('--golden-cross', action='store_true', help='10-week SMA above 40-week SMA')
-    p.add_argument('--consensus', nargs='?', const=CONSENSUS_DIR, metavar='PATH',
+    p.add_argument('--consensus', nargs='?', const='', metavar='PATH',
                    help='merge 9hoon consensus: a snapshot CSV, or the newest in a folder '
-                        f'(default {CONSENSUS_DIR})')
+                        '(default: the universe\'s consensus folder)')
     p.add_argument('--min-upside', type=float, help='minimum upside to the median target, %%')
     p.add_argument('--min-analysts', type=int, help='minimum number of covering analysts')
     p.add_argument('--rating', action='append', metavar='RATING',
@@ -195,12 +232,22 @@ def parse_args(argv=None):
         or args.sort in CONSENSUS_COLUMNS
     if uses_consensus and args.consensus is None:
         p.error('consensus filters and sorts need --consensus')
+    if args.universe != 'all' and any(getattr(args, f) for f in MARKET_FILTERS):
+        p.error('--market, --kind and --sector need --universe all')
+    price_dir, consensus_dir, args.symbols = UNIVERSES[args.universe]
+    args.data_dir = args.data_dir or price_dir
+    if args.consensus == '':
+        # The market-wide snapshot is new; fall back to the SET100 one until it exists
+        args.consensus = consensus_dir if glob.glob(os.path.join(consensus_dir, '*.csv')) else CONSENSUS_DIR
     return args
 
 
 def main(argv=None):
     args = parse_args(argv)
     metrics = load_metrics(args.data_dir)
+    if args.symbols:
+        # Inner join drops files of stocks that have since been delisted
+        metrics = load_symbols(args.symbols).merge(metrics, on='ticker')
     if args.consensus:
         metrics = metrics.merge(load_consensus(args.consensus), on='ticker', how='left')
     result = screen(metrics, args)

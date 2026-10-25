@@ -20,7 +20,12 @@ screener.py -> ad-hoc filters on the weekly quotes (returns, RSI, 10/40-week SMA
 python screener.py --min-rsi 50 --above-sma 40 --golden-cross --near-high 5
 python screener.py --consensus --min-upside 15 --min-analysts 5 --rating Buy --sort upside
 python screener.py --consensus --max-pe 15 --min-div 4 --sort div_yield --top 10 --csv value.csv
+# every SET and mai stock (data/market/), with market, company/fund, sector and traded-value filters
+python screener.py --universe all --market mai --kind company --min-value 5 --above-sma 40
+python screener.py --universe all --consensus --min-upside 20 --sector BANK --sector FIN
 ```
+
+market_download.py -> weekly quotes since 2016 for every stock on SET and mai (about 930, from the set.or.th stock list) into data/market/prices/, fetched from Yahoo in batches; the list, with each stock's market, sector and kind (company or property fund/REIT), goes to data/market/symbols.csv
 
 test_sources.py -> check which data sources (Yahoo, 9hoon, Settrade, set.or.th) answer from your network, e.g. when a download starts failing
 
@@ -30,7 +35,7 @@ recon.py -> map how a web page delivers its data (tables, forms, JS endpoints, H
 
 ## Automation
 
-.github/workflows/update-data.yml runs all of the above on weekdays at 18:40 Bangkok time and commits the results. It can also be started by hand from the Actions tab. .github/workflows/ci.yml runs the tests on every push.
+.github/workflows/update-data.yml runs the SET100 scripts on weekdays at 18:40 Bangkok time and commits the results. .github/workflows/market-data.yml then runs market_download.py and `consensus.py --all-symbols --out-dir data/market/consensus` for the whole market at 18:52. It can also be started by hand from the Actions tab. .github/workflows/ci.yml runs the tests on every push.
 
 ## Setup
 

@@ -1,0 +1,59 @@
+name: Market data
+
+# Weekly prices for every SET and mai stock (market_download.py) and the full
+# 9hoon consensus table, committed to data/market/. Runs after "Update data".
+on:
+  schedule:
+    # 18:52 Bangkok, Monday-Friday
+    - cron: '52 11 * * 1-5'
+  workflow_dispatch:
+  # Runs once when this workflow or the downloader changes, so a branch gets data
+  push:
+    paths:
+      - .github/workflows/market-data.yml
+      - market_download.py
+
+permissions:
+  contents: write
+
+# Same group as "Update data", so the two never push at the same time
+concurrency:
+  group: update-data-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  market:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Weekly prices, all SET and mai stocks
+        run: python market_download.py
+
+      - name: Analyst consensus, all stocks
+        continue-on-error: true
+        run: python consensus.py --all-symbols --out-dir data/market/consensus
+
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/market
+          if git diff --cached --quiet; then
+            echo 'no changes'
+            exit 0
+          fi
+          git commit -m "Update market data $(date -u +%Y-%m-%d)"
+          for i in 1 2 3; do
+            git pull --rebase origin "${{ github.ref_name }}" && git push && exit 0
+            sleep $((i * 10))
+          done
+          exit 1
