@@ -14,6 +14,16 @@ consensus_history.py -> history of the daily consensus snapshots and each stock'
 
 analytics.py -> risk/return metrics, multi-factor screener (momentum, volatility, dividend yield, consensus upside) and a 12-1 momentum backtest, written to reports/
 
+screener.py -> ad-hoc filters on the weekly quotes (returns, RSI, 10/40-week SMA, 52-week high/low, volatility, volume) and, with --consensus, the newest 9hoon snapshot (upside, analyst count, rating, P/E, P/BV, dividend yield)
+
+```bash
+python screener.py --min-rsi 50 --above-sma 40 --golden-cross --near-high 5
+python screener.py --consensus --min-upside 15 --min-analysts 5 --rating Buy --sort upside
+python screener.py --consensus --max-pe 15 --min-div 4 --sort div_yield --top 10 --csv value.csv
+```
+
+test_sources.py -> check which data sources (Yahoo, 9hoon, Settrade, set.or.th) answer from your network, e.g. when a download starts failing
+
 recon.py -> map how a web page delivers its data (tables, forms, JS endpoints, HAR captures) before writing a scraper
 
 ## Automation
