@@ -38,3 +38,20 @@ def test_update_all_fetches_new_symbols_in_full_and_extends_existing(tmp_path, m
     assert len(ptt) == 60 + 4 - 3      # old file ends 2025-02-17: three weeks overlap and are replaced
     assert ptt['Close'].iloc[0] == 5.0 and ptt['Close'].iloc[-1] == 9.0
     assert len(pd.read_csv(tmp_path / 'AU.csv')) == 70
+
+
+def test_short_or_missing_batch_results_are_retried(monkeypatch):
+    fetched = []
+
+    def fake_fetch(symbol, start):
+        fetched.append(symbol)
+        return {'QUICK.BK': weekly('2016-01-04', 500).reset_index(),
+                'NEW.BK': weekly('2026-10-05', 3).reset_index()}.get(symbol)
+
+    monkeypatch.setattr(md.download, 'fetch', fake_fetch)
+    frames = {'PTT': weekly('2016-01-04', 500).reset_index(),
+              'QUICK': weekly('2026-10-19', 1).reset_index(),
+              'NEW': weekly('2026-10-05', 3).reset_index()}
+    out = md.retry_short(['PTT', 'QUICK', 'NEW', 'GONE'], frames)
+    assert fetched == ['QUICK.BK', 'NEW.BK', 'GONE.BK']      # PTT already has a full history
+    assert list(out) == ['QUICK'] and len(out['QUICK']) == 500   # NEW stays as the batch returned it

@@ -17,6 +17,7 @@ import pandas as pd
 import yfinance as yf
 
 import market_coverage as mc
+import download
 from download import COLUMNS, load_existing, merge, week_start
 
 OUT_DIR = 'data/market'
@@ -58,6 +59,27 @@ def fetch_batch(symbols, start):
     return {s[:-3]: df for s, df in frames_by_symbol(data, yahoo).items()}
 
 
+def retry_short(symbols, frames, min_weeks=52):
+    """Refetch, one at a time, symbols the batch missed or returned under a year for.
+
+    Yahoo's weekly batch sometimes returns only the latest bars of a stock with a
+    long history (seen for QUICK and MJLF); download.fetch rebuilds the weeks from
+    daily bars in that case. New listings stay short, which is correct.
+    """
+    out = {}
+    for s in symbols:
+        if s in frames and len(frames[s]) >= min_weeks:
+            continue
+        try:
+            df = download.fetch(s + '.BK', START_DATE)
+        except Exception as e:
+            print(f'{s}: retry failed ({e})')
+            continue
+        if df is not None and len(df) > len(frames.get(s, [])):
+            out[s] = df
+    return out
+
+
 def update_all(symbols, price_dir, full=False):
     """Fetch and save every symbol; return the symbols Yahoo had no data for."""
     os.makedirs(price_dir, exist_ok=True)
@@ -72,6 +94,8 @@ def update_all(symbols, price_dir, full=False):
         for i in range(0, len(group), BATCH):
             chunk = group[i:i + BATCH]
             frames = fetch_batch(chunk, start)
+            if needs_full:
+                frames.update(retry_short(chunk, frames))
             for s in chunk:
                 if s not in frames:
                     failed.append(s)
