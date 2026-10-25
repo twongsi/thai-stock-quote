@@ -55,3 +55,12 @@ def test_short_or_missing_batch_results_are_retried(monkeypatch):
     out = md.retry_short(['PTT', 'QUICK', 'NEW', 'GONE'], frames)
     assert fetched == ['QUICK.BK', 'NEW.BK', 'GONE.BK']      # PTT already has a full history
     assert list(out) == ['QUICK'] and len(out['QUICK']) == 500   # NEW stays as the batch returned it
+
+
+def test_short_file_keeps_its_rows_when_refetch_returns_fewer(tmp_path, monkeypatch):
+    weekly('2026-10-05', 3).reset_index().to_csv(tmp_path / 'TIPAK.csv', index=False, date_format='%Y-%m-%d')
+    monkeypatch.setattr(md, 'fetch_batch', lambda symbols, start: {s: weekly('2026-10-19', 1).reset_index()
+                                                                   for s in symbols})
+    monkeypatch.setattr(md.download, 'fetch', lambda symbol, start: None)
+    assert md.update_all(['TIPAK'], str(tmp_path)) == []
+    assert len(pd.read_csv(tmp_path / 'TIPAK.csv')) == 3

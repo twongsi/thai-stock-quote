@@ -83,6 +83,7 @@ def retry_short(symbols, frames, min_weeks=52):
 def update_all(symbols, price_dir, full=False):
     """Fetch and save every symbol; return the symbols Yahoo had no data for."""
     os.makedirs(price_dir, exist_ok=True)
+    # --full ignores saved files entirely; otherwise they are always merged with new rows
     existing = {s: (None if full else load_existing(os.path.join(price_dir, f'{s}.csv'))) for s in symbols}
     # Group by start date so one new listing doesn't force ten years for a whole batch
     by_start = {}
@@ -100,8 +101,9 @@ def update_all(symbols, price_dir, full=False):
                 if s not in frames:
                     failed.append(s)
                     continue
-                old = None if needs_full else existing[s]
-                merge(old, frames[s]).to_csv(os.path.join(price_dir, f'{s}.csv'),
+                # Merge even on a full refetch: Yahoo's history for a stock can come back
+                # shorter than last time, and rows already saved should not be lost
+                merge(existing[s], frames[s]).to_csv(os.path.join(price_dir, f'{s}.csv'),
                                              index=False, date_format='%Y-%m-%d')
             print(f'{"full" if needs_full else "update"} from {start}: '
                   f'{min(i + BATCH, len(group))}/{len(group)}')
