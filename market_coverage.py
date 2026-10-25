@@ -1,6 +1,7 @@
 """Test which SET and mai stocks the data sources cover.
 
-Gets every common stock listed on SET and mai from set.or.th's stock list (the
+Gets every stock (type S) listed on SET and mai, split into companies and
+property funds/REITs, from set.or.th's stock list (the
 index composition endpoint returns 404 for 'set' and 'mai'), then checks each
 symbol against:
   - Yahoo Finance: daily bars over the last month (yfinance, in batches)
@@ -59,7 +60,10 @@ def common_stocks(rows, markets):
     # 'S' = common stock; warrants, DRs, ETFs and funds use other codes
     keep = rows['market'].str.lower().isin(markets) & \
         (rows['security_type'].isna() | (rows['security_type'] == 'S'))
-    return rows[keep].drop_duplicates('symbol').sort_values('symbol').reset_index(drop=True)
+    out = rows[keep].drop_duplicates('symbol').sort_values('symbol').reset_index(drop=True)
+    # Property funds, REITs and leasehold trusts trade as type S under sector PF&REIT
+    out['kind'] = out['sector'].fillna('').str.upper().eq('PF&REIT').map({True: 'fund', False: 'company'})
+    return out
 
 
 def stock_list_symbols(payload, market):
@@ -105,13 +109,12 @@ def hoon_coverage(symbols):
 
 def summarize(cov):
     lines = []
-    for market, g in cov.groupby('market'):
+    for (market, kind), g in cov.groupby(['market', 'kind']):
         n = len(g)
         yahoo = (g['yahoo_days'] > 0).sum()
         hoon = g['in_9hoon'].sum()
-        analysts = (g.get('hoon_analysts', pd.Series(dtype=float)) > 0).sum()
-        lines.append(f'{market}: {n} stocks | Yahoo {yahoo} ({yahoo / n:.0%}) | '
-                     f'9hoon {hoon} ({hoon / n:.0%}), with analysts {analysts}')
+        lines.append(f'{market} {kind}: {n} | Yahoo {yahoo} ({yahoo / n:.0%}) | '
+                     f'9hoon consensus {hoon} ({hoon / n:.0%})')
         missing = g.loc[g['yahoo_days'] == 0, 'symbol'].tolist()
         if missing:
             lines.append(f'  no Yahoo data ({len(missing)}): {", ".join(missing)}')
@@ -130,15 +133,10 @@ def main():
         print(f'{market}: {len(mine)} securities by type: '
               + ', '.join(f'{k}={v}' for k, v in mine['security_type'].fillna('none').value_counts().items()))
     universe = common_stocks(rows, args.markets)
-    for market, g in universe.groupby('market'):
-        print(f'{market} type S by sector: '
-              + ', '.join(f'{k}={v}' for k, v in g['sector'].fillna('none').value_counts().items()))
-        funds = g[g['sector'].fillna('').str.upper().str.contains('REIT|PF|FUND|INFRA')]
-        if len(funds):
-            print(f'  funds/REITs ({len(funds)}): {", ".join(funds["symbol"])}')
-    print(f'{len(universe)} common stocks to check')
     if universe.empty:
         sys.exit('no common stocks found in the stock list')
+    print(f'{len(universe)} type-S securities to check: '
+          + ', '.join(f'{k}={v}' for k, v in universe.groupby(['market', 'kind']).size().items()))
     os.makedirs(args.out, exist_ok=True)
     universe.to_csv(os.path.join(args.out, 'symbols.csv'), index=False)
 

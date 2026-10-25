@@ -43,10 +43,22 @@ def test_hoon_coverage_reads_cover_and_upside(monkeypatch):
     assert np.isnan(out.loc['AU', 'hoon_analysts']) and 'AOT' not in out.index
 
 
-def test_summary_counts_per_market():
-    cov = pd.DataFrame({'symbol': ['PTT', 'AOT', 'AU'], 'market': ['SET', 'SET', 'mai'],
-                        'yahoo_days': [20, 0, 18], 'in_9hoon': [True, False, True],
-                        'hoon_analysts': [19, np.nan, np.nan]})
+def test_funds_are_split_from_companies():
+    payload = {'securitySymbols': [
+        {'symbol': 'PTT', 'market': 'SET', 'securityType': 'S', 'sector': 'ENERG'},
+        {'symbol': 'CPNREIT', 'market': 'SET', 'securityType': 'S', 'sector': 'PF&REIT'},
+        {'symbol': 'AU', 'market': 'mai', 'securityType': 'S', 'sector': None},
+    ]}
+    rows = mc.common_stocks(mc.list_rows(payload), ['set', 'mai']).set_index('symbol')
+    assert rows.loc['CPNREIT', 'kind'] == 'fund'
+    assert rows.loc['PTT', 'kind'] == 'company' and rows.loc['AU', 'kind'] == 'company'
+
+
+def test_summary_counts_per_market_and_kind():
+    cov = pd.DataFrame({'symbol': ['PTT', 'AOT', 'CPNREIT', 'AU'], 'market': ['SET', 'SET', 'SET', 'mai'],
+                        'kind': ['company', 'company', 'fund', 'company'],
+                        'yahoo_days': [20, 0, 20, 18], 'in_9hoon': [True, False, False, True]})
     text = mc.summarize(cov)
-    assert 'SET: 2 stocks | Yahoo 1 (50%) | 9hoon 1 (50%), with analysts 1' in text
-    assert 'no Yahoo data (1): AOT' in text and 'mai: 1 stocks' in text
+    assert 'SET company: 2 | Yahoo 1 (50%) | 9hoon consensus 1 (50%)' in text
+    assert 'no Yahoo data (1): AOT' in text
+    assert 'SET fund: 1 | Yahoo 1 (100%)' in text and 'mai company: 1' in text
