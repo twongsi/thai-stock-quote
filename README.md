@@ -24,6 +24,8 @@ python screener.py --consensus --max-pe 15 --min-div 4 --sort div_yield --top 10
 
 test_sources.py -> check which data sources (Yahoo, 9hoon, Settrade, set.or.th) answer from your network, e.g. when a download starts failing
 
+market_coverage.py -> list every SET and mai stock from set.or.th and test which ones Yahoo and 9hoon cover, written to reports/market/ (run by .github/workflows/market-coverage.yml, results as a run artifact)
+
 recon.py -> map how a web page delivers its data (tables, forms, JS endpoints, HAR captures) before writing a scraper
 
 ## Automation

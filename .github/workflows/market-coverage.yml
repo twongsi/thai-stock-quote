@@ -1,0 +1,35 @@
+name: Market coverage
+
+# Tests Yahoo and 9hoon coverage of every SET and mai stock. Results are
+# uploaded as an artifact and shown in the run summary; nothing is committed.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/market-coverage.yml
+      - market_coverage.py
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python market_coverage.py --out reports/market
+      - name: Run summary
+        if: always()
+        run: |
+          if [ -f reports/market/summary.txt ]; then
+            { echo '```'; cat reports/market/summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: market-coverage
+          path: reports/market/
+          if-no-files-found: ignore
