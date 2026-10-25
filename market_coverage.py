@@ -1,7 +1,8 @@
 """Test which SET and mai stocks the data sources cover.
 
-Gets every constituent of the SET and mai indices from set.or.th (same JSON API
-as get_tickers.py), then checks each symbol against:
+Gets every common stock listed on SET and mai from set.or.th's stock list (the
+index composition endpoint returns 404 for 'set' and 'mai'), then checks each
+symbol against:
   - Yahoo Finance: daily bars over the last month (yfinance, in batches)
   - 9hoon: whether the analyst-consensus table has a row for it
 
@@ -20,13 +21,10 @@ import requests
 import yfinance as yf
 
 import consensus
-from get_tickers import HEADERS, extract_symbols
+from get_tickers import HEADERS
 
-COMPOSITION_URL = 'https://www.set.or.th/api/set/index/{index}/composition'
-OVERVIEW_URL = 'https://www.set.or.th/en/market/index/{index}/overview'
 STOCK_LIST_URL = 'https://www.set.or.th/api/set/stock/list'
-# Rough constituent counts; fewer than this means the response was not the full list
-MIN_SYMBOLS = {'set': 300, 'mai': 100}
+STOCK_LIST_PAGE = 'https://www.set.or.th/en/market/get-quote/stock/'
 BATCH = 100
 
 
@@ -36,42 +34,37 @@ def market_session():
     return session
 
 
-def composition(session, index):
-    referer = OVERVIEW_URL.format(index=index)
-    session.get(referer, timeout=30)   # the API expects a normal page visit first
-    resp = session.get(COMPOSITION_URL.format(index=index), params={'lang': 'en'},
-                       headers={'Referer': referer}, timeout=30)
+def stock_list(session):
+    session.get(STOCK_LIST_PAGE, timeout=30)   # the API expects a normal page visit first
+    resp = session.get(STOCK_LIST_URL, headers={'Referer': STOCK_LIST_PAGE}, timeout=30)
     resp.raise_for_status()
-    return extract_symbols(resp.json())
+    return resp.json()
+
+
+def list_rows(payload):
+    rows = payload.get('securitySymbols', []) if isinstance(payload, dict) else payload
+    return pd.DataFrame([{
+        'symbol': str(r['symbol']).strip().upper(),
+        'market': 'SET' if str(r.get('market', '')).lower() == 'set' else str(r.get('market', '')),
+        'security_type': r.get('securityType'),
+        'industry': r.get('industry'),
+        'sector': r.get('sector'),
+    } for r in rows if isinstance(r, dict) and r.get('symbol')])
+
+
+def common_stocks(rows, markets):
+    """Common stocks of the given markets, one row per symbol."""
+    if rows.empty:
+        return rows
+    # 'S' = common stock; warrants, DRs, ETFs and funds use other codes
+    keep = rows['market'].str.lower().isin(markets) & \
+        (rows['security_type'].isna() | (rows['security_type'] == 'S'))
+    return rows[keep].drop_duplicates('symbol').sort_values('symbol').reset_index(drop=True)
 
 
 def stock_list_symbols(payload, market):
-    """Common stocks of one market from the /stock/list response."""
-    rows = payload.get('securitySymbols', []) if isinstance(payload, dict) else payload
-    out = []
-    for row in rows:
-        if not isinstance(row, dict) or not row.get('symbol'):
-            continue
-        if str(row.get('market', '')).lower() != market:
-            continue
-        # 'S' = common stock; warrants, DRs, ETFs and preferred shares use other codes
-        if row.get('securityType') not in (None, 'S'):
-            continue
-        out.append(row['symbol'].strip().upper())
-    return sorted(set(out))
-
-
-def market_symbols(session, market):
-    try:
-        symbols = composition(session, market)
-        if len(symbols) >= MIN_SYMBOLS[market]:
-            return symbols, 'index composition'
-        print(f'{market}: composition returned {len(symbols)} symbols, trying the stock list')
-    except Exception as e:
-        print(f'{market}: composition failed ({e}), trying the stock list')
-    resp = session.get(STOCK_LIST_URL, timeout=30)
-    resp.raise_for_status()
-    return stock_list_symbols(resp.json(), market), 'stock list'
+    rows = common_stocks(list_rows(payload), [market])
+    return rows['symbol'].tolist() if not rows.empty else []
 
 
 def yahoo_coverage(symbols, period='1mo'):
@@ -131,15 +124,15 @@ def main():
     ap.add_argument('--out', default='reports/market')
     args = ap.parse_args()
 
-    session = market_session()
-    frames = []
+    rows = list_rows(stock_list(market_session()))
     for market in args.markets:
-        symbols, source = market_symbols(session, market)
-        print(f'{market}: {len(symbols)} symbols from {source}')
-        frames.append(pd.DataFrame({'symbol': symbols, 'market': market.upper() if market == 'set' else market}))
-    universe = pd.concat(frames, ignore_index=True).drop_duplicates('symbol')
+        mine = rows[rows['market'].str.lower() == market]
+        print(f'{market}: {len(mine)} securities by type: '
+              + ', '.join(f'{k}={v}' for k, v in mine['security_type'].fillna('none').value_counts().items()))
+    universe = common_stocks(rows, args.markets)
+    print(f'{len(universe)} common stocks to check')
     if universe.empty:
-        sys.exit('no symbols found')
+        sys.exit('no common stocks found in the stock list')
     os.makedirs(args.out, exist_ok=True)
     universe.to_csv(os.path.join(args.out, 'symbols.csv'), index=False)
 
