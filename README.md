@@ -6,9 +6,11 @@ Weekly prices, analyst consensus and simple analytics for the SET100.
 
 get_tickers.py -> download the SET100 constituents from the SET website, save to tickers.csv
 
-download.py -> download weekly quotes of each ticker from Yahoo Finance (yfinance) into data/, only new weeks; SET index into data/index/SET.csv; files of stocks that left the index move to data/former/
+download.py -> download weekly quotes of each ticker from Yahoo Finance (yfinance) into data/, only new weeks; SET index and TDEX (SET50 ETF, the long-run benchmark) into data/index/; files of stocks that left the index move to data/former/
 
 consensus.py -> snapshot the analyst-consensus table from 9hoon.com (aset) for SET100 tickers, save to data/consensus/YYYY-MM-DD.csv
+
+consensus_history.py -> history of the daily consensus snapshots and each stock's change in median target since the previous snapshot and about a month earlier, written to reports/
 
 analytics.py -> risk/return metrics, multi-factor screener (momentum, volatility, dividend yield, consensus upside) and a 12-1 momentum backtest, written to reports/
 

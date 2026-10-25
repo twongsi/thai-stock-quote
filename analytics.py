@@ -88,11 +88,18 @@ def clean_prices(prices, window=9, max_ratio=1.8):
 def load_index(path='data/index/SET.csv'):
     if not os.path.exists(path):
         return None
+    name = os.path.splitext(os.path.basename(path))[0]
     df = pd.read_csv(path, parse_dates=['Date']).drop_duplicates('Date', keep='last').set_index('Date')
     s = df['Adj Close'] if df['Adj Close'].notna().any() else df['Close']
-    s = clean_prices(s.where(s > 0)).rename('SET')
-    print(f'SET index: {s.notna().sum()} weeks, {s.first_valid_index()} to {s.last_valid_index()}')
+    s = clean_prices(s.where(s > 0)).rename(name)
+    print(f'{name}: {s.notna().sum()} weeks, {s.first_valid_index()} to {s.last_valid_index()}')
     return s if s.notna().sum() > WEEKS_PER_YEAR else None
+
+
+def load_benchmarks(folder='data/index'):
+    """Every usable series in data/index/ (SET index, TDEX SET50 ETF)."""
+    found = [load_index(p) for p in sorted(glob.glob(os.path.join(folder, '*.csv')))]
+    return [s for s in found if s is not None]
 
 
 # ---------- metrics ----------
@@ -263,9 +270,8 @@ def main():
     scr = screen(m, load_latest_consensus())
 
     bt = backtest(adj, top=args.top, cost_bps=args.cost_bps)
-    index = load_index()
-    if index is not None:
-        bt = bt.join(index.pct_change(fill_method=None).rename('SET'), how='left')
+    for bench in load_benchmarks():
+        bt = bt.join(bench.pct_change(fill_method=None), how='left')
     summary = summarize(bt, args.rf)
 
     os.makedirs(args.out, exist_ok=True)
