@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Portfolio & Strategy Testing Sandbox</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM (pinned versions) -->
+    <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Prompt', sans-serif; }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useMemo } = React;
+
+        const fmtPct = (v) => (v >= 0 ? `+${v.toFixed(2)}%` : `${v.toFixed(2)}%`);
+        const fmtUsd = (v) => (v >= 0 ? `+${v.toFixed(2)} USD` : `${v.toFixed(2)} USD`);
+
+        function App() {
+            // --- Active Tab ---
+            const [activeTab, setActiveTab] = useState('stress');
+
+            // --- 1. Portfolio Asset Allocation State ---
+            const [portfolio, setPortfolio] = useState({
+                coreBondsRMF: 50,    // 50% Core
+                usTechEquities: 20,  // 20% Satellite US Tech
+                thaiDividend: 15,    // 15% Thai Dividend & REITs/IFFs (DIF/TFFIF)
+                cashGold: 15         // 15% Cash & Short-Term
+            });
+
+            const totalWeight = portfolio.coreBondsRMF + portfolio.usTechEquities + portfolio.thaiDividend + portfolio.cashGold;
+
+            // --- 2. Stress Test Simulation State ---
+            const [scenario, setScenario] = useState('rate_shock'); // 'rate_shock', 'covid_crash', 'stagflation', 'bull_run'
+
+            // --- 3. Options Strategy Simulator State ---
+            const [optionType, setOptionType] = useState('csp'); // 'csp' (Cash-Secured Put), 'cc' (Covered Call)
+            const [stockPrice, setStockPrice] = useState(100);
+            const [strikePrice, setStrikePrice] = useState(95);
+            const [premiumReceived, setPremiumReceived] = useState(3.5);
+            const [targetTestPrice, setTargetTestPrice] = useState(88);
+
+            // --- Stress Test Calculation ---
+            const scenarioResults = useMemo(() => {
+                let coreReturn = 0, techReturn = 0, thaiReturn = 0, cashReturn = 0;
+                let description = "";
+
+                if (scenario === 'rate_shock') {
+                    // Bond yield spike 3.5%
+                    coreReturn = -6.5;
+                    techReturn = -18.5;
+                    thaiReturn = -12.0;
+                    cashReturn = 1.5;
+                    description = "สถานการณ์ Bond Yield พุ่งแรงสู่ 3.5% (Rate Hike Shock): กระทบสินทรัพย์เติบโตและกองทุนโครงสร้างพื้นฐาน";
+                } else if (scenario === 'covid_crash') {
+                    // Sudden panic
+                    coreReturn = 3.0;
+                    techReturn = -30.0;
+                    thaiReturn = -25.0;
+                    cashReturn = 2.0;
+                    description = "สถานการณ์วิกฤตฉับพลัน (COVID-style Crash): หุ้นร่วงหนักทั่วโลก พันธบัตรและเงินสดทำหน้าที่หลุมหลบภัย";
+                } else if (scenario === 'stagflation') {
+                    // Inflation stays high
+                    coreReturn = -8.0;
+                    techReturn = -15.0;
+                    thaiReturn = -5.0;
+                    cashReturn = 1.0;
+                    description = "สถานการณ์ภาวะเงินเฟ้อสูงเศรษฐกิจชะลอตัว (Stagflation): พันธบัตรและหุ้นเติบโตเผชิญแรงกดดันพร้อมกัน";
+                } else if (scenario === 'bull_run') {
+                    // Fed cuts rates & economic growth
+                    coreReturn = 7.5;
+                    techReturn = 28.0;
+                    thaiReturn = 15.0;
+                    cashReturn = 1.5;
+                    description = "สถานการณ์ดอกเบี้ยขาลงและเศรษฐกิจฟื้นตัว (Fed Rate Cut Bull Run): สินทรัพย์เติบโตและหุ้นปันผลพุ่งเด่น";
+                }
+
+                // Per-asset contribution to portfolio return (percentage points)
+                const contributions = [
+                    { label: 'Core: พันธบัตร/RMF', weight: portfolio.coreBondsRMF, ret: coreReturn },
+                    { label: 'US Tech / Global', weight: portfolio.usTechEquities, ret: techReturn },
+                    { label: 'Thai Dividend & REITs/IFFs', weight: portfolio.thaiDividend, ret: thaiReturn },
+                    { label: 'Cash & Short-Term', weight: portfolio.cashGold, ret: cashReturn },
+                ].map(a => ({ ...a, contrib: a.weight * a.ret / 100 }));
+
+                const weightedReturn = contributions.reduce((sum, a) => sum + a.contrib, 0);
+
+                return { coreReturn, techReturn, thaiReturn, cashReturn, weightedReturn, contributions, description };
+            }, [scenario, portfolio]);
+
+            // --- Options PnL Calculation (per contract = 100 shares) ---
+            const optionsResult = useMemo(() => {
+                let pnl = 0;
+                let status = "";
+                let breakeven = 0, maxProfit = 0, maxLoss = 0, capital = 0;
+                if (optionType === 'csp') {
+                    // Cash-Secured Put: Sold Put at strikePrice, received premium. If price at expiry <= strike, assigned at strike.
+                    const assigned = targetTestPrice <= strikePrice;
+                    pnl = assigned ? (premiumReceived - (strikePrice - targetTestPrice)) * 100 : premiumReceived * 100;
+                    status = assigned ? `ถูกบังคับซื้อหุ้น (Assigned) ที่ราคา Strike ${strikePrice} USD` : `สัญญาหมดอายุไร้ค่า (Expired OTM) - รับเต็มพรีเมียม`;
+                    breakeven = strikePrice - premiumReceived;
+                    maxProfit = premiumReceived * 100;
+                    maxLoss = -(strikePrice - premiumReceived) * 100;
+                    capital = strikePrice * 100;
+                } else {
+                    // Covered Call: Bought stock at stockPrice, Sold Call at strikePrice, received premium.
+                    const calledAway = targetTestPrice >= strikePrice;
+                    const stockGain = calledAway ? (strikePrice - stockPrice) : (targetTestPrice - stockPrice);
+                    pnl = (stockGain + premiumReceived) * 100;
+                    status = calledAway ? `หุ้นถูกเรียกคืน (Called Away) ที่ราคา Strike ${strikePrice} USD` : `ถือครองหุ้นต่อ + ได้รับพรีเมียมค่าตั๋ว`;
+                    breakeven = stockPrice - premiumReceived;
+                    maxProfit = (strikePrice - stockPrice + premiumReceived) * 100;
+                    maxLoss = -(stockPrice - premiumReceived) * 100;
+                    capital = stockPrice * 100;
+                }
+                const returnOnCapital = capital > 0 ? (pnl / capital) * 100 : 0;
+                return { pnl, status, breakeven, maxProfit, maxLoss, capital, returnOnCapital };
+            }, [optionType, stockPrice, strikePrice, premiumReceived, targetTestPrice]);
+
+            const riskLabel = scenarioResults.weightedReturn <= -15
+                ? { text: 'High Risk (ขาดทุนหนัก)', cls: 'text-rose-400' }
+                : scenarioResults.weightedReturn <= -5
+                    ? { text: 'Moderate Risk', cls: 'text-amber-400' }
+                    : { text: 'Defensive / Resilient', cls: 'text-emerald-400' };
+
+            const sliders = [
+                { key: 'coreBondsRMF', label: 'Core: พันธบัตร/RMF (มั่นคง):' },
+                { key: 'usTechEquities', label: 'Satellite: US Tech / Global:' },
+                { key: 'thaiDividend', label: 'Satellite: Thai Dividend & REITs/IFFs:' },
+                { key: 'cashGold', label: 'Cash & Short-Term Buffer:' },
+            ];
+
+            const numberInputs = [
+                { label: 'ราคาหุ้นปัจจุบันอ้างอิง ($)', value: stockPrice, set: setStockPrice, step: '1' },
+                { label: 'ราคา Strike Price ($)', value: strikePrice, set: setStrikePrice, step: '1' },
+                { label: 'พรีเมียมที่ได้รับ ($/หุ้น)', value: premiumReceived, set: setPremiumReceived, step: '0.5' },
+                { label: 'ราคาจำลอง ณ วันหมดอายุ ($)', value: targetTestPrice, set: setTargetTestPrice, step: '1' },
+            ];
+
+            return (
+                <div className="max-w-7xl mx-auto p-4 md:p-6">
+                    {/* Header */}
+                    <header className="bg-slate-800 border border-slate-700 rounded-2xl p-6 mb-6 shadow-xl">
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                            <div>
+                                <span className="bg-indigo-500/20 text-indigo-400 text-xs px-3 py-1 rounded-full font-semibold uppercase tracking-wider">Quant Testing Sandbox v1.0</span>
+                                <h1 className="text-2xl md:text-3xl font-bold text-white mt-2">ระบบจำลองและทดสอบกลยุทธ์พอร์ตการลงทุน (Stress Test & Options Lab)</h1>
+                                <p className="text-slate-400 text-sm mt-1">ทดสอบสัดส่วน Core-Satellite, จำลองวิกฤตเศรษฐกิจ และคำนวณผลตอบแทน Options Strategies</p>
+                            </div>
+                            <div className="bg-slate-900 border border-slate-700 px-4 py-3 rounded-xl text-right">
+                                <div className="text-xs text-slate-400">สัดส่วนพอร์ตสินทรัพย์รวม</div>
+                                <div className={`text-xl font-bold ${totalWeight === 100 ? 'text-emerald-400' : 'text-rose-400'}`}>{totalWeight}% {totalWeight !== 100 && '(ต้องเท่ากับ 100%)'}</div>
+                            </div>
+                        </div>
+
+                        {/* Navigation Tabs */}
+                        <div className="flex flex-wrap gap-2 mt-6 border-t border-slate-700 pt-4">
+                            <button onClick={() => setActiveTab('stress')} className={`px-4 py-2 rounded-xl text-sm font-medium transition ${activeTab === 'stress' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' : 'bg-slate-700/50 text-slate-300 hover:bg-slate-700'}`}>
+                                🧪 1. Portfolio Stress Test Lab
+                            </button>
+                            <button onClick={() => setActiveTab('options')} className={`px-4 py-2 rounded-xl text-sm font-medium transition ${activeTab === 'options' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' : 'bg-slate-700/50 text-slate-300 hover:bg-slate-700'}`}>
+                                📊 2. Options Strategy Simulator (CSP / CC)
+                            </button>
+                        </div>
+                    </header>
+
+                    {/* TAB 1: PORTFOLIO STRESS TEST LAB */}
+                    {activeTab === 'stress' && (
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* Left: Asset Allocator */}
+                            <div className="bg-slate-800 border border-slate-700 rounded-2xl p-6 shadow-xl space-y-4">
+                                <h3 className="text-lg font-semibold text-white mb-2">⚙️ กำหนดสัดส่วนพอร์ต (Core-Satellite)</h3>
+
+                                {sliders.map(s => (
+                                    <div key={s.key}>
+                                        <div className="flex justify-between text-sm mb-1">
+                                            <span className="text-slate-300">{s.label}</span>
+                                            <span className="font-bold text-indigo-400">{portfolio[s.key]}%</span>
+                                        </div>
+                                        <input type="range" min="0" max="100" value={portfolio[s.key]} onChange={(e) => setPortfolio({...portfolio, [s.key]: Number(e.target.value)})} className="w-full accent-indigo-500" />
+                                    </div>
+                                ))}
+
+                                <button onClick={() => setPortfolio({ coreBondsRMF: 50, usTechEquities: 20, thaiDividend: 15, cashGold: 15 })} className="w-full mt-2 px-3 py-2 rounded-xl text-xs font-medium bg-slate-700/50 text-slate-300 hover:bg-slate-700 transition">
+                                    ↺ รีเซ็ตเป็นสัดส่วนตั้งต้น (50/20/15/15)
+                                </button>
+                            </div>
+
+                            {/* Right: Stress Test Engine */}
+                            <div className="lg:col-span-2 bg-slate-800 border border-slate-700 rounded-2xl p-6 shadow-xl flex flex-col justify-between space-y-6">
+                                <div>
+                                    <h3 className="text-lg font-semibold text-white mb-3">🌪️ เลือกสถานการณ์ทดสอบวิกฤต (Select Stress Scenario)</h3>
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+                                        <button onClick={() => setScenario('rate_shock')} className={`p-3 rounded-xl text-xs font-medium border transition text-center ${scenario === 'rate_shock' ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-300'}`}>
+                                            📈 Rate Shock (Yield 3.5%)
+                                        </button>
+                                        <button onClick={() => setScenario('covid_crash')} className={`p-3 rounded-xl text-xs font-medium border transition text-center ${scenario === 'covid_crash' ? 'bg-rose-600 border-rose-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-300'}`}>
+                                            💥 COVID Panic Crash
+                                        </button>
+                                        <button onClick={() => setScenario('stagflation')} className={`p-3 rounded-xl text-xs font-medium border transition text-center ${scenario === 'stagflation' ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-300'}`}>
+                                            📉 Stagflation
+                                        </button>
+                                        <button onClick={() => setScenario('bull_run')} className={`p-3 rounded-xl text-xs font-medium border transition text-center ${scenario === 'bull_run' ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-300'}`}>
+                                            🚀 Bull Market Run
+                                        </button>
+                                    </div>
+
+                                    <div className="bg-slate-900/80 p-4 rounded-xl border border-slate-700 text-sm text-slate-300 mb-6">
+                                        {scenarioResults.description}
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                        <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                            <div className="text-xs text-slate-400">ผลตอบแทนพอร์ตจำลองรวม (Weighted Return)</div>
+                                            <div className={`text-2xl font-bold mt-1 ${scenarioResults.weightedReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(scenarioResults.weightedReturn)}</div>
+                                            {totalWeight !== 100 && <div className="text-xs text-rose-400 mt-1">⚠️ สัดส่วนรวม {totalWeight}% ผลลัพธ์ยังไม่สะท้อนพอร์ตเต็ม</div>}
+                                        </div>
+                                        <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                            <div className="text-xs text-slate-400">ระดับความเสี่ยงพอร์ต</div>
+                                            <div className={`text-lg font-bold mt-1 ${riskLabel.cls}`}>{riskLabel.text}</div>
+                                        </div>
+                                        <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                            <div className="text-xs text-slate-400">สถานะเงินสดสำรอง (Buffer)</div>
+                                            <div className="text-lg font-bold text-indigo-400 mt-1">{portfolio.cashGold}% Buffer</div>
+                                        </div>
+                                    </div>
+
+                                    {/* Contribution breakdown */}
+                                    <div className="mt-6 overflow-x-auto">
+                                        <table className="w-full text-sm">
+                                            <thead>
+                                                <tr className="text-slate-400 text-xs border-b border-slate-700">
+                                                    <th className="text-left py-2 font-medium">สินทรัพย์</th>
+                                                    <th className="text-right py-2 font-medium">น้ำหนัก</th>
+                                                    <th className="text-right py-2 font-medium">ผลตอบแทนสมมติ</th>
+                                                    <th className="text-right py-2 font-medium">ผลกระทบต่อพอร์ต</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {scenarioResults.contributions.map(a => (
+                                                    <tr key={a.label} className="border-b border-slate-700/50">
+                                                        <td className="py-2 text-slate-300">{a.label}</td>
+                                                        <td className="py-2 text-right text-slate-300">{a.weight}%</td>
+                                                        <td className={`py-2 text-right ${a.ret >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(a.ret)}</td>
+                                                        <td className={`py-2 text-right font-semibold ${a.contrib >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(a.contrib)}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                                <p className="text-xs text-slate-500">ผลตอบแทนแต่ละสถานการณ์เป็นค่าสมมติเพื่อการศึกษา ไม่ใช่การพยากรณ์และไม่ใช่คำแนะนำการลงทุน</p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* TAB 2: OPTIONS STRATEGY SIMULATOR */}
+                    {activeTab === 'options' && (
+                        <div className="bg-slate-800 border border-slate-700 rounded-2xl p-6 shadow-xl space-y-6">
+                            <h3 className="text-lg font-semibold text-white">📊 เครื่องมือจำลองกำไร/ขาดทุน Options (Cash-Secured Puts / Covered Calls)</h3>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                    <label className="text-xs text-slate-400 block mb-1">กลยุทธ์ Options</label>
+                                    <select value={optionType} onChange={(e) => setOptionType(e.target.value)} className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 text-white font-bold">
+                                        <option value="csp">Cash-Secured Put (CSP)</option>
+                                        <option value="cc">Covered Call (CC)</option>
+                                    </select>
+                                </div>
+                                {numberInputs.map(f => (
+                                    <div key={f.label} className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                        <label className="text-xs text-slate-400 block mb-1">{f.label}</label>
+                                        <input type="number" step={f.step} value={f.value} onChange={(e) => f.set(Number(e.target.value))} className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 text-white font-bold" />
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="bg-slate-900/90 border border-slate-700 p-6 rounded-2xl flex flex-col md:flex-row justify-between items-center gap-4">
+                                <div>
+                                    <div className="text-xs text-slate-400">ผลลัพธ์สถานะสัญญา:</div>
+                                    <div className="text-lg font-bold text-white mt-1">{optionsResult.status}</div>
+                                </div>
+                                <div className="text-right">
+                                    <div className="text-xs text-slate-400">กำไร/ขาดทุนสุทธิ (Net PnL, 1 สัญญา = 100 หุ้น):</div>
+                                    <div className={`text-2xl font-bold ${optionsResult.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                        {fmtUsd(optionsResult.pnl)}
+                                    </div>
+                                    <div className="text-xs text-slate-400 mt-1">ผลตอบแทนต่อเงินทุน {fmtPct(optionsResult.returnOnCapital)}</div>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                    <div className="text-xs text-slate-400">จุดคุ้มทุน (Breakeven)</div>
+                                    <div className="text-lg font-bold text-white mt-1">{optionsResult.breakeven.toFixed(2)} USD</div>
+                                </div>
+                                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                    <div className="text-xs text-slate-400">กำไรสูงสุด (Max Profit)</div>
+                                    <div className="text-lg font-bold text-emerald-400 mt-1">{fmtUsd(optionsResult.maxProfit)}</div>
+                                </div>
+                                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                    <div className="text-xs text-slate-400">ขาดทุนสูงสุด (หุ้นเหลือ 0)</div>
+                                    <div className="text-lg font-bold text-rose-400 mt-1">{fmtUsd(optionsResult.maxLoss)}</div>
+                                </div>
+                                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                    <div className="text-xs text-slate-400">{optionType === 'csp' ? 'เงินสดที่ต้องกันไว้' : 'เงินลงทุนซื้อหุ้น'}</div>
+                                    <div className="text-lg font-bold text-indigo-400 mt-1">{optionsResult.capital.toFixed(2)} USD</div>
+                                </div>
+                            </div>
+
+                            <p className="text-xs text-slate-500">คำนวณ ณ วันหมดอายุ ไม่รวมค่าคอมมิชชั่น ภาษี และเงินปันผล เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน</p>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

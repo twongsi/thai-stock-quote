@@ -32,6 +32,7 @@ pytest -q
 
 - docs/reverse-engineering-data-sources.md: how to find where a page gets its data, with tools from awesome-reverse-engineering
 - docs/literature-review-analyst-forecasts.md: research on the accuracy and value of analyst target prices, with notes for the screener
+- docs/strategy-sandbox.html: browser sandbox (Thai) for stress-testing a Core-Satellite allocation under four hypothetical scenarios and computing cash-secured put / covered call payoffs at expiry; open the file in a browser
 - notebooks/set100_web_data_and_backtest.ipynb: teaching notebook (Thai) covering data collection, data cleaning, risk metrics, screening and backtesting
 
 ## Caveats
