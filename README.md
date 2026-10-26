@@ -12,7 +12,7 @@ consensus.py -> snapshot the analyst-consensus table from 9hoon.com (aset) for S
 
 consensus_history.py -> history of the daily consensus snapshots and each stock's change in median target since the previous snapshot and about a month earlier, written to reports/
 
-analytics.py -> risk/return metrics, multi-factor screener (momentum, volatility, dividend yield, consensus upside) and a 12-1 momentum backtest, written to reports/
+analytics.py -> risk/return metrics, multi-factor screener (momentum, volatility, dividend yield, consensus upside) and a 12-1 momentum backtest, written to reports/; also writes the weekly TDEX total-return series to docs/sandbox-data.js for the sandbox page
 
 recon.py -> map how a web page delivers its data (tables, forms, JS endpoints, HAR captures) before writing a scraper
 
@@ -32,7 +32,7 @@ pytest -q
 
 - docs/reverse-engineering-data-sources.md: how to find where a page gets its data, with tools from awesome-reverse-engineering
 - docs/literature-review-analyst-forecasts.md: research on the accuracy and value of analyst target prices, with notes for the screener
-- docs/strategy-sandbox.html: browser sandbox (Thai) for stress-testing a Core-Satellite allocation under four hypothetical scenarios, a Monte Carlo backtest of the same allocation (correlated monthly returns, monthly rebalancing, optional DCA, P5/median/P95 fan chart, drawdown and loss probability), and cash-secured put / covered call payoffs at expiry; open the file in a browser
+- docs/strategy-sandbox.html: browser sandbox (Thai) for stress-testing a Core-Satellite allocation under four hypothetical scenarios, a backtest of the same allocation either on real weekly TDEX data since 2010 (Thai sleeve only; the other sleeves grow at their assumed rate) against a 100% TDEX benchmark, or as a Monte Carlo simulation (correlated monthly returns, P5/median/P95 fan chart, drawdown and loss probability), both with monthly rebalancing and optional DCA, and cash-secured put / covered call payoffs at expiry; open the file in a browser (keep sandbox-data.js next to it)
 - notebooks/set100_web_data_and_backtest.ipynb: teaching notebook (Thai) covering data collection, data cleaning, risk metrics, screening and backtesting
 
 ## Caveats

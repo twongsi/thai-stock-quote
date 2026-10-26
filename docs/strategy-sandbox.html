@@ -11,6 +11,8 @@
     <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
     <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+    <!-- Weekly TDEX total-return history, written by analytics.py (optional; enables the historical backtest) -->
+    <script src="sandbox-data.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap');
         body { font-family: 'Prompt', sans-serif; }
@@ -121,6 +123,244 @@
             };
         }
 
+        // --- Historical backtest on real weekly data (TDEX, SET50 ETF, total return) ---
+        const HIST = (window.SANDBOX_DATA && window.SANDBOX_DATA.series && window.SANDBOX_DATA.series.TDEX) || null;
+        const THAI_INDEX = ASSETS.findIndex(a => a.key === 'thaiDividend');
+        const PORT_COLOR = '#6366f1', BENCH_COLOR = '#d97706';
+
+        function seriesStats(weekly, dates, rf) {
+            let twr = 1, peak = 1, maxDd = 0, sum = 0, sumSq = 0;
+            const byYear = {};
+            weekly.forEach((r, k) => {
+                twr *= 1 + r;
+                peak = Math.max(peak, twr);
+                maxDd = Math.min(maxDd, twr / peak - 1);
+                sum += r; sumSq += r * r;
+                const y = dates[k + 1].slice(0, 4);
+                byYear[y] = (byYear[y] ?? 1) * (1 + r);
+            });
+            const n = weekly.length;
+            const years = (new Date(dates[dates.length - 1]) - new Date(dates[0])) / (365.25 * 864e5);
+            const cagr = (Math.pow(twr, 1 / years) - 1) * 100;
+            const vol = Math.sqrt(Math.max(sumSq / n - (sum / n) ** 2, 0) * n / Math.max(n - 1, 1)) * Math.sqrt(52) * 100;
+            const yearly = Object.fromEntries(Object.entries(byYear).map(([y, g]) => [y, (g - 1) * 100]));
+            const yv = Object.values(yearly);
+            return {
+                cagr, vol, maxDd: maxDd * 100, totalReturn: (twr - 1) * 100,
+                sharpe: vol > 0 ? (cagr - rf) / vol : 0,
+                yearly, worstYear: Math.min(...yv), bestYear: Math.max(...yv),
+            };
+        }
+
+        // Thai sleeve follows TDEX week by week; the other sleeves grow at their assumed annual rate.
+        // DCA goes in and the portfolio rebalances to target in the first week of each month.
+        function runHistorical({ weights, assumptions, initial, monthly, startYear, endYear }) {
+            const { dates, values } = HIST;
+            const idx = [];
+            dates.forEach((d, i) => { const y = +d.slice(0, 4); if (y >= startYear && y <= endYear) idx.push(i); });
+            if (idx.length < 53) return null;
+            const fixed = assumptions.map(a => Math.pow(1 + a.mu / 100, 1 / 52) - 1);
+            let hold = weights.map(w => w * initial), bench = initial, invested = initial;
+            let prevMonth = dates[idx[0]].slice(0, 7);
+            const out = { dates: [dates[idx[0]]], port: [initial], bench: [initial], invested: [initial], weeklyPort: [], weeklyBench: [] };
+            for (let k = 1; k < idx.length; k++) {
+                const i = idx[k];
+                const thaiR = values[i] / values[i - 1] - 1;
+                const before = hold.reduce((s, h) => s + h, 0);
+                hold = hold.map((h, j) => h * (1 + (j === THAI_INDEX ? thaiR : fixed[j])));
+                const after = hold.reduce((s, h) => s + h, 0);
+                out.weeklyPort.push(before > 0 ? after / before - 1 : 0);
+                out.weeklyBench.push(thaiR);
+                bench *= 1 + thaiR;
+                const month = dates[i].slice(0, 7);
+                if (month !== prevMonth) {
+                    const total = after + monthly;
+                    hold = weights.map(w => w * total);
+                    bench += monthly;
+                    invested += monthly;
+                    prevMonth = month;
+                }
+                out.dates.push(dates[i]);
+                out.port.push(hold.reduce((s, h) => s + h, 0));
+                out.bench.push(bench);
+                out.invested.push(invested);
+            }
+            const rf = assumptions[ASSETS.findIndex(a => a.key === 'cashGold')].mu;
+            out.statsPort = seriesStats(out.weeklyPort, out.dates, rf);
+            out.statsBench = seriesStats(out.weeklyBench, out.dates, rf);
+            out.thaiWeight = weights[THAI_INDEX];
+            return out;
+        }
+
+        function HistChart({ result }) {
+            const [hoverRaw, setHover] = useState(null);
+            const W = 800, H = 320, m = { l: 64, r: 96, t: 16, b: 36 };
+            const iw = W - m.l - m.r, ih = H - m.t - m.b;
+            const { dates, port, bench, invested } = result;
+            const n = dates.length - 1;
+            const hover = hoverRaw !== null && hoverRaw <= n ? hoverRaw : null; // range may have shrunk since the last hover
+            const yMax = Math.max(...port, ...bench, ...invested) * 1.05;
+            const x = i => m.l + (i / n) * iw;
+            const y = v => m.t + ih - (v / yMax) * ih;
+            const path = vals => vals.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
+            const yTicks = Array.from({ length: 5 }, (_, i) => (yMax / 4) * i);
+            const yearStarts = dates.map((d, i) => [d.slice(0, 4), i]).filter(([yr], i) => i === 0 || yr !== dates[i - 1].slice(0, 4));
+            const every = Math.ceil(yearStarts.length / 8);
+            const fmtAxis = v => v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : `${Math.round(v / 1e3)}K`;
+            // Keep the two end labels from overlapping
+            let yPort = y(port[n]), yBench = y(bench[n]);
+            if (Math.abs(yPort - yBench) < 14) { const mid = (yPort + yBench) / 2, s = yPort <= yBench ? -7 : 7; yPort = mid + s; yBench = mid - s; }
+
+            const onMove = (e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const px = ((e.clientX - rect.left) / rect.width) * W;
+                const i = Math.round(((px - m.l) / iw) * n);
+                setHover(i >= 0 && i <= n ? i : null);
+            };
+
+            return (
+                <div className="relative">
+                    <div className="flex flex-wrap gap-4 text-xs text-slate-300 mb-2">
+                        <span className="flex items-center gap-2"><span className="inline-block w-4 h-0.5" style={{ background: PORT_COLOR }}></span>พอร์ตของคุณ</span>
+                        <span className="flex items-center gap-2"><span className="inline-block w-4 h-0.5" style={{ background: BENCH_COLOR }}></span>TDEX 100% (เงินลงทุนเท่ากัน)</span>
+                        <span className="flex items-center gap-2"><span className="inline-block w-4 border-t border-dashed border-slate-400"></span>เงินลงทุนรวม</span>
+                    </div>
+                    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="กราฟมูลค่าพอร์ตเทียบกับ TDEX จากข้อมูลจริงรายสัปดาห์">
+                        {yTicks.map(v => (
+                            <g key={v}>
+                                <line x1={m.l} x2={W - m.r} y1={y(v)} y2={y(v)} stroke="#334155" strokeWidth="1" />
+                                <text x={m.l - 8} y={y(v) + 4} textAnchor="end" fontSize="11" fill="#94a3b8">{fmtAxis(v)}</text>
+                            </g>
+                        ))}
+                        {yearStarts.filter((_, k) => k % every === 0).map(([yr, i]) => (
+                            <text key={yr} x={x(i)} y={H - m.b + 18} textAnchor="middle" fontSize="11" fill="#94a3b8">{yr}</text>
+                        ))}
+                        <path d={path(invested)} fill="none" stroke="#94a3b8" strokeWidth="1" strokeDasharray="4 4" />
+                        <path d={path(bench)} fill="none" stroke={BENCH_COLOR} strokeWidth="2" strokeLinejoin="round" />
+                        <path d={path(port)} fill="none" stroke={PORT_COLOR} strokeWidth="2" strokeLinejoin="round" />
+                        <text x={W - m.r + 6} y={yPort + 4} fontSize="11" fill="#f1f5f9" fontWeight="600">พอร์ต</text>
+                        <text x={W - m.r + 6} y={yBench + 4} fontSize="11" fill="#cbd5e1">TDEX</text>
+                        {hover !== null && (
+                            <g>
+                                <line x1={x(hover)} x2={x(hover)} y1={m.t} y2={m.t + ih} stroke="#cbd5e1" strokeWidth="1" />
+                                <circle cx={x(hover)} cy={y(bench[hover])} r="4" fill={BENCH_COLOR} stroke="#1e293b" strokeWidth="2" />
+                                <circle cx={x(hover)} cy={y(port[hover])} r="4" fill={PORT_COLOR} stroke="#1e293b" strokeWidth="2" />
+                            </g>
+                        )}
+                        <rect x={m.l} y={m.t} width={iw} height={ih} fill="transparent" onMouseMove={onMove} onMouseLeave={() => setHover(null)} />
+                    </svg>
+                    {hover !== null && (
+                        <div className="absolute top-8 pointer-events-none bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-xs shadow-xl"
+                             style={{ left: `${(x(hover) / W) * 100}%`, transform: hover > n / 2 ? 'translateX(calc(-100% - 12px))' : 'translateX(12px)' }}>
+                            <div className="text-slate-400 mb-1">สัปดาห์ {dates[hover]}</div>
+                            <div className="text-slate-300">พอร์ต: <span className="font-semibold text-white">{fmtThb(port[hover])}</span></div>
+                            <div className="text-slate-300">TDEX: <span className="font-semibold text-white">{fmtThb(bench[hover])}</span></div>
+                            <div className="text-slate-300">ลงทุนรวม: <span className="font-semibold text-white">{fmtThb(invested[hover])}</span></div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function HistResults({ result, startYear, endYear }) {
+            if (!HIST) {
+                return <div className="text-rose-400 text-sm">ไม่พบไฟล์ข้อมูล sandbox-data.js (สร้างได้ด้วยคำสั่ง <code>python analytics.py</code>) ต้องวางไว้โฟลเดอร์เดียวกับหน้านี้</div>;
+            }
+            if (!result) {
+                return <div className="text-rose-400 text-sm">ช่วงเวลาสั้นเกินไปหรือไม่มีสัดส่วนพอร์ต กรุณาเลือกอย่างน้อย 1 ปีเต็มและกำหนดสัดส่วนในแท็บ 1</div>;
+            }
+            const p = result.statsPort, b = result.statsBench, n = result.dates.length - 1;
+            const realShare = result.thaiWeight * 100;
+            const rows = [
+                ['มูลค่าปลายทาง', fmtThb(result.port[n]), fmtThb(result.bench[n])],
+                ['CAGR (time-weighted)', fmtPct(p.cagr), fmtPct(b.cagr)],
+                ['ผลตอบแทนสะสม (time-weighted)', fmtPct(p.totalReturn), fmtPct(b.totalReturn)],
+                ['ความผันผวนต่อปี', `${p.vol.toFixed(1)}%`, `${b.vol.toFixed(1)}%`],
+                ['Max Drawdown', `${p.maxDd.toFixed(1)}%`, `${b.maxDd.toFixed(1)}%`],
+                ['Sharpe Ratio', p.sharpe.toFixed(2), b.sharpe.toFixed(2)],
+                ['ปีที่ดีที่สุด', fmtPct(p.bestYear), fmtPct(b.bestYear)],
+                ['ปีที่แย่ที่สุด', fmtPct(p.worstYear), fmtPct(b.worstYear)],
+            ];
+            return (
+                <>
+                    <div>
+                        <h3 className="text-lg font-semibold text-white">📈 Backtest ด้วยข้อมูลจริง ({result.dates[0]} ถึง {result.dates[n]}, {n} สัปดาห์)</h3>
+                        <p className="text-xs text-slate-400 mt-1">ฝั่งหุ้นไทยใช้ผลตอบแทนรวมปันผลรายสัปดาห์จริงของ TDEX (ETF อ้างอิง SET50) เทียบกับการลงทุนใน TDEX 100% ด้วยเงินก้อนแรกและ DCA เท่ากัน</p>
+                    </div>
+
+                    <HistChart result={result} />
+
+                    {realShare < 99.5 && (
+                        <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl p-3 text-xs text-amber-200">
+                            ⚠️ มีเพียง {realShare.toFixed(0)}% ของพอร์ต (ฝั่งหุ้นไทย) ที่ใช้ข้อมูลจริง อีก {(100 - realShare).toFixed(0)}% เติบโตคงที่ตามสมมติฐานโดยไม่มีความผันผวน
+                            ความผันผวน, Max Drawdown และ Sharpe ของพอร์ตจึงดูดีเกินจริง ใช้เปรียบเทียบผลของการลดสัดส่วนหุ้นไทยได้ แต่ไม่ควรตีความเป็นความเสี่ยงจริงของทั้งพอร์ต
+                        </div>
+                    )}
+
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="text-slate-400 text-xs border-b border-slate-700">
+                                    <th className="text-left py-2 font-medium">ตัวชี้วัด</th>
+                                    <th className="text-right py-2 font-medium"><span className="inline-block w-3 h-0.5 align-middle mr-1" style={{ background: PORT_COLOR }}></span>พอร์ตของคุณ</th>
+                                    <th className="text-right py-2 font-medium"><span className="inline-block w-3 h-0.5 align-middle mr-1" style={{ background: BENCH_COLOR }}></span>TDEX 100%</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {rows.map(([label, a, c]) => (
+                                    <tr key={label} className="border-b border-slate-700/50">
+                                        <td className="py-2 text-slate-300">{label}</td>
+                                        <td className="py-2 text-right font-semibold text-white">{a}</td>
+                                        <td className="py-2 text-right text-slate-300">{c}</td>
+                                    </tr>
+                                ))}
+                                <tr>
+                                    <td className="py-2 text-slate-400 text-xs">เงินลงทุนรวม</td>
+                                    <td colSpan="2" className="py-2 text-right text-slate-400 text-xs">{fmtThb(result.invested[n])}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <details className="bg-slate-900/60 border border-slate-700 rounded-xl p-4">
+                        <summary className="cursor-pointer text-sm text-slate-300">ดูผลตอบแทนรายปีปฏิทิน</summary>
+                        <div className="overflow-x-auto mt-3">
+                            <table className="w-full text-xs">
+                                <thead>
+                                    <tr className="text-slate-400 border-b border-slate-700">
+                                        <th className="text-left py-1 font-medium">ปี</th>
+                                        <th className="text-right py-1 font-medium">พอร์ตของคุณ</th>
+                                        <th className="text-right py-1 font-medium">TDEX 100%</th>
+                                        <th className="text-right py-1 font-medium">ส่วนต่าง</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {Object.keys(p.yearly).map(yr => {
+                                        const diff = p.yearly[yr] - b.yearly[yr];
+                                        return (
+                                            <tr key={yr} className="border-b border-slate-700/50 text-slate-300">
+                                                <td className="py-1">{yr}{(yr === result.dates[0].slice(0, 4) || yr === result.dates[n].slice(0, 4)) ? ' *' : ''}</td>
+                                                <td className="py-1 text-right">{fmtPct(p.yearly[yr])}</td>
+                                                <td className="py-1 text-right">{fmtPct(b.yearly[yr])}</td>
+                                                <td className="py-1 text-right">{fmtPct(diff)}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                            <p className="text-xs text-slate-500 mt-2">* ปีแรกและปีสุดท้ายอาจไม่ครบปี</p>
+                        </div>
+                    </details>
+
+                    <p className="text-xs text-slate-500">
+                        ข้อมูล TDEX ถึงสัปดาห์ {window.SANDBOX_DATA.asOf} จาก Yahoo Finance ผ่าน analytics.py (รวมปันผล หักค่าธรรมเนียมกองทุนแล้วในราคา) ใช้ TDEX แทนสินทรัพย์ฝั่ง Thai Dividend & REITs/IFFs จึงไม่สะท้อนหุ้นปันผลหรือกองทุนโครงสร้างพื้นฐานโดยตรง
+                        ส่วนพันธบัตร หุ้นสหรัฐฯ และเงินสดใน repo ยังไม่มีข้อมูลจริง จึงเติบโตคงที่ตามผลตอบแทนที่สมมติไว้ทุกสัปดาห์ ทำให้ความผันผวนและ drawdown ของพอร์ตต่ำกว่าความจริง
+                        Sharpe ใช้ผลตอบแทนเงินสดที่สมมติเป็นอัตราปลอดความเสี่ยง ไม่รวมภาษีและค่าซื้อขาย ผลในอดีตไม่ได้รับประกันผลในอนาคตและไม่ใช่คำแนะนำการลงทุน
+                    </p>
+                </>
+            );
+        }
+
         function FanChart({ bands, invested, years }) {
             const [hover, setHover] = useState(null);
             const W = 800, H = 320, m = { l: 64, r: 72, t: 16, b: 36 };
@@ -227,6 +467,20 @@
                 return runMonteCarlo({ weights, assumptions, initial: initialCapital, monthly: monthlyContribution, years, paths: numPaths, seed });
             }, [activeTab, portfolio, totalWeight, assumptions, initialCapital, monthlyContribution, years, numPaths, seed]);
 
+            // --- 5. Historical Backtest State (real TDEX data) ---
+            const histFirstYear = HIST ? +HIST.dates[0].slice(0, 4) : 2010;
+            const histLastYear = HIST ? +HIST.dates[HIST.dates.length - 1].slice(0, 4) : 2010;
+            const [btMode, setBtMode] = useState(HIST ? 'hist' : 'mc'); // 'hist' (real data) or 'mc' (Monte Carlo)
+            const [startYear, setStartYear] = useState(histFirstYear);
+            const [endYear, setEndYear] = useState(histLastYear);
+            const histYears = Array.from({ length: histLastYear - histFirstYear + 1 }, (_, i) => histFirstYear + i);
+
+            const histResult = useMemo(() => {
+                if (activeTab !== 'backtest' || btMode !== 'hist' || !HIST || totalWeight <= 0) return null;
+                const weights = ASSETS.map(a => portfolio[a.key] / totalWeight);
+                return runHistorical({ weights, assumptions, initial: initialCapital, monthly: monthlyContribution, startYear, endYear });
+            }, [activeTab, btMode, portfolio, totalWeight, assumptions, initialCapital, monthlyContribution, startYear, endYear]);
+
             // --- Stress Test Calculation ---
             const scenarioResults = useMemo(() => {
                 let coreReturn = 0, techReturn = 0, thaiReturn = 0, cashReturn = 0;
@@ -332,7 +586,7 @@
                             <div>
                                 <span className="bg-indigo-500/20 text-indigo-400 text-xs px-3 py-1 rounded-full font-semibold uppercase tracking-wider">Quant Testing Sandbox v1.0</span>
                                 <h1 className="text-2xl md:text-3xl font-bold text-white mt-2">ระบบจำลองและทดสอบกลยุทธ์พอร์ตการลงทุน (Stress Test, Backtest & Options Lab)</h1>
-                                <p className="text-slate-400 text-sm mt-1">ทดสอบสัดส่วน Core-Satellite, จำลองวิกฤตเศรษฐกิจ, Backtest จำลองสถานการณ์ตลาด (Monte Carlo) และคำนวณผลตอบแทน Options Strategies</p>
+                                <p className="text-slate-400 text-sm mt-1">ทดสอบสัดส่วน Core-Satellite, จำลองวิกฤตเศรษฐกิจ, Backtest ด้วยข้อมูลจริง TDEX และจำลองสถานการณ์ตลาด (Monte Carlo) และคำนวณผลตอบแทน Options Strategies</p>
                             </div>
                             <div className="bg-slate-900 border border-slate-700 px-4 py-3 rounded-xl text-right">
                                 <div className="text-xs text-slate-400">สัดส่วนพอร์ตสินทรัพย์รวม</div>
@@ -349,7 +603,7 @@
                                 📊 2. Options Strategy Simulator (CSP / CC)
                             </button>
                             <button onClick={() => setActiveTab('backtest')} className={`px-4 py-2 rounded-xl text-sm font-medium transition ${activeTab === 'backtest' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' : 'bg-slate-700/50 text-slate-300 hover:bg-slate-700'}`}>
-                                🎲 3. Monte Carlo Backtest
+                                🎲 3. Backtest (ข้อมูลจริง / Monte Carlo)
                             </button>
                         </div>
                     </header>
@@ -502,12 +756,20 @@
                         </div>
                     )}
 
-                    {/* TAB 3: MONTE CARLO BACKTEST */}
+                    {/* TAB 3: BACKTEST (historical TDEX data or Monte Carlo) */}
                     {activeTab === 'backtest' && (
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                             {/* Left: Inputs & assumptions */}
                             <div className="bg-slate-800 border border-slate-700 rounded-2xl p-6 shadow-xl space-y-4">
-                                <h3 className="text-lg font-semibold text-white">🎲 ตั้งค่าการจำลอง</h3>
+                                <h3 className="text-lg font-semibold text-white">🎲 ตั้งค่า Backtest</h3>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button onClick={() => setBtMode('hist')} className={`p-2 rounded-xl text-xs font-medium border transition ${btMode === 'hist' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-300'}`}>
+                                        📜 ข้อมูลจริง (TDEX)
+                                    </button>
+                                    <button onClick={() => setBtMode('mc')} className={`p-2 rounded-xl text-xs font-medium border transition ${btMode === 'mc' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-300'}`}>
+                                        🎲 Monte Carlo
+                                    </button>
+                                </div>
                                 <p className="text-xs text-slate-400">ใช้สัดส่วนพอร์ตจากแท็บ 1 (ปรับให้รวมเป็น 100% อัตโนมัติ) และปรับสมดุลพอร์ตทุกเดือน</p>
 
                                 <div>
@@ -518,6 +780,23 @@
                                     <label className="text-xs text-slate-400 block mb-1">ลงทุนเพิ่มทุกเดือน (DCA, THB)</label>
                                     <input type="number" step="1000" min="0" value={monthlyContribution} onChange={(e) => setMonthlyContribution(Math.max(0, Number(e.target.value)))} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white font-bold" />
                                 </div>
+                                {btMode === 'hist' && HIST && (
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="text-xs text-slate-400 block mb-1">ปีเริ่มต้น</label>
+                                            <select value={startYear} onChange={(e) => { const v = Number(e.target.value); setStartYear(v); if (v > endYear) setEndYear(v); }} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white font-bold">
+                                                {histYears.map(yr => <option key={yr} value={yr}>{yr}</option>)}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-slate-400 block mb-1">ปีสิ้นสุด</label>
+                                            <select value={endYear} onChange={(e) => { const v = Number(e.target.value); setEndYear(v); if (v < startYear) setStartYear(v); }} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white font-bold">
+                                                {histYears.map(yr => <option key={yr} value={yr}>{yr}</option>)}
+                                            </select>
+                                        </div>
+                                    </div>
+                                )}
+                                {btMode === 'mc' && (<>
                                 <div>
                                     <div className="flex justify-between text-sm mb-1">
                                         <span className="text-slate-300">ระยะเวลาลงทุน:</span>
@@ -543,6 +822,7 @@
                                         </div>
                                     </div>
                                 </div>
+                                </>)}
 
                                 <div>
                                     <div className="text-sm text-slate-300 mb-2">สมมติฐานรายปีของแต่ละสินทรัพย์</div>
@@ -560,7 +840,11 @@
                                                 <tr key={a.key} className="border-b border-slate-700/50">
                                                     <td className="py-1 text-slate-300">{a.label}</td>
                                                     <td className="py-1 text-right text-slate-300">{totalWeight > 0 ? ((portfolio[a.key] / totalWeight) * 100).toFixed(0) : 0}%</td>
-                                                    {['mu', 'vol'].map(f => (
+                                                    {btMode === 'hist' && i === THAI_INDEX ? (
+                                                        <td colSpan="2" className="py-1 text-right text-amber-400 font-semibold">ข้อมูลจริง TDEX</td>
+                                                    ) : ['mu', 'vol'].map(f => btMode === 'hist' && f === 'vol' ? (
+                                                        <td key={f} className="py-1 text-right text-slate-500" title="โหมดข้อมูลจริง: สินทรัพย์นี้เติบโตคงที่ ไม่มีความผันผวน">—</td>
+                                                    ) : (
                                                         <td key={f} className="py-1 text-right">
                                                             <input type="number" step="0.5" min={f === 'vol' ? 0 : -50} value={a[f]}
                                                                 onChange={(e) => setAssumptions(assumptions.map((b, j) => j === i ? { ...b, [f]: f === 'vol' ? Math.max(0, Number(e.target.value)) : Number(e.target.value) } : b))}
@@ -579,7 +863,9 @@
 
                             {/* Right: Results */}
                             <div className="lg:col-span-2 bg-slate-800 border border-slate-700 rounded-2xl p-6 shadow-xl space-y-6">
-                                {!backtest ? (
+                                {btMode === 'hist' ? (
+                                    <HistResults result={histResult} startYear={startYear} endYear={endYear} />
+                                ) : !backtest ? (
                                     <div className="text-rose-400">กรุณากำหนดสัดส่วนพอร์ตในแท็บ 1 อย่างน้อยหนึ่งสินทรัพย์</div>
                                 ) : (
                                     <>

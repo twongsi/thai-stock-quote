@@ -68,3 +68,19 @@ def test_load_benchmarks_skips_short_series(tmp_path):
     short.to_csv(tmp_path / 'SET.csv', index=False)
     names = [s.name for s in a.load_benchmarks(str(tmp_path))]
     assert names == ['TDEX']
+
+
+def test_export_sandbox_data_writes_rebased_series(tmp_path):
+    folder = tmp_path / 'index'
+    folder.mkdir()
+    idx = weekly(60)
+    close = 10 * 1.01 ** np.arange(60)
+    pd.DataFrame({'Date': idx, 'Close': close, 'Adj Close': close}).to_csv(folder / 'TDEX.csv', index=False)
+    pd.DataFrame({'Date': idx[:1], 'Close': [1.0], 'Adj Close': [1.0]}).to_csv(folder / 'SET.csv', index=False)
+    out = tmp_path / 'sandbox-data.js'
+    data = a.export_sandbox_data(str(out), str(folder))
+    assert list(data['series']) == ['TDEX']      # one-row SET file is skipped
+    tdex = data['series']['TDEX']
+    assert tdex['values'][0] == 100 and np.isclose(tdex['values'][-1], 100 * 1.01 ** 59, rtol=1e-4)
+    assert data['asOf'] == tdex['dates'][-1]
+    assert out.read_text().splitlines()[1].startswith('window.SANDBOX_DATA = {')
