@@ -24,6 +24,169 @@
 
         const fmtPct = (v) => (v >= 0 ? `+${v.toFixed(2)}%` : `${v.toFixed(2)}%`);
         const fmtUsd = (v) => (v >= 0 ? `+${v.toFixed(2)} USD` : `${v.toFixed(2)} USD`);
+        const fmtThb = (v) => `${Math.round(v).toLocaleString('en-US')} THB`;
+
+        // --- Monte Carlo backtest assumptions (hypothetical, annual %) ---
+        const ASSETS = [
+            { key: 'coreBondsRMF', label: 'Core: พันธบัตร/RMF', mu: 3.0, vol: 4.0 },
+            { key: 'usTechEquities', label: 'US Tech / Global', mu: 10.0, vol: 22.0 },
+            { key: 'thaiDividend', label: 'Thai Dividend & REITs/IFFs', mu: 6.0, vol: 15.0 },
+            { key: 'cashGold', label: 'Cash & Short-Term', mu: 1.5, vol: 0.5 },
+        ];
+        // Correlation matrix, same order as ASSETS
+        const CORR = [
+            [1.0, -0.1, 0.1, 0.0],
+            [-0.1, 1.0, 0.6, 0.0],
+            [0.1, 0.6, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+
+        function cholesky(m) {
+            const n = m.length;
+            const L = m.map(() => new Array(n).fill(0));
+            for (let i = 0; i < n; i++) {
+                for (let j = 0; j <= i; j++) {
+                    let s = m[i][j];
+                    for (let k = 0; k < j; k++) s -= L[i][k] * L[j][k];
+                    L[i][j] = i === j ? Math.sqrt(Math.max(s, 0)) : s / L[j][j];
+                }
+            }
+            return L;
+        }
+        const CHOL = cholesky(CORR);
+
+        // Seeded RNG so a run can be reproduced
+        function mulberry32(a) {
+            return function () {
+                a |= 0; a = (a + 0x6D2B79F5) | 0;
+                let t = Math.imul(a ^ (a >>> 15), 1 | a);
+                t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+                return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+            };
+        }
+        function normalPair(rand) {
+            const u = Math.max(rand(), 1e-12), v = rand();
+            const r = Math.sqrt(-2 * Math.log(u));
+            return [r * Math.cos(2 * Math.PI * v), r * Math.sin(2 * Math.PI * v)];
+        }
+        const percentile = (sorted, p) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.round(p * (sorted.length - 1))))];
+
+        // Monthly lognormal returns per asset, correlated via Cholesky, rebalanced monthly to target weights
+        function runMonteCarlo({ weights, assumptions, initial, monthly, years, paths, seed }) {
+            const rand = mulberry32(seed);
+            const months = years * 12;
+            const n = assumptions.length;
+            const drift = assumptions.map(a => (Math.log(1 + a.mu / 100) - 0.5 * (a.vol / 100) ** 2) / 12);
+            const sig = assumptions.map(a => (a.vol / 100) / Math.sqrt(12));
+            const values = Array.from({ length: months + 1 }, () => new Float64Array(paths));
+            const finals = new Float64Array(paths), drawdowns = new Float64Array(paths), cagrs = new Float64Array(paths);
+            const invested = initial + monthly * months;
+            for (let p = 0; p < paths; p++) {
+                let v = initial, peak = 1, maxDd = 0, units = 1; // units: value of 1 THB invested at start (time-weighted)
+                values[0][p] = v;
+                for (let t = 1; t <= months; t++) {
+                    const z = [];
+                    while (z.length < n) z.push(...normalPair(rand));
+                    let r = 0;
+                    for (let i = 0; i < n; i++) {
+                        let e = 0;
+                        for (let k = 0; k <= i; k++) e += CHOL[i][k] * z[k];
+                        r += weights[i] * (Math.exp(drift[i] + sig[i] * e) - 1);
+                    }
+                    v = v * (1 + r) + monthly;
+                    units *= 1 + r;
+                    peak = Math.max(peak, units);
+                    maxDd = Math.min(maxDd, units / peak - 1);
+                    values[t][p] = v;
+                }
+                finals[p] = v;
+                drawdowns[p] = maxDd * 100;
+                cagrs[p] = (Math.pow(units, 1 / years) - 1) * 100;
+            }
+            const bands = values.map(col => {
+                const s = Float64Array.from(col).sort();
+                return { p5: percentile(s, 0.05), p50: percentile(s, 0.5), p95: percentile(s, 0.95) };
+            });
+            const sf = Float64Array.from(finals).sort();
+            const sd = Float64Array.from(drawdowns).sort();
+            const sc = Float64Array.from(cagrs).sort();
+            let losers = 0;
+            for (let p = 0; p < paths; p++) if (finals[p] < invested) losers++;
+            return {
+                bands, invested,
+                p5: percentile(sf, 0.05), p50: percentile(sf, 0.5), p95: percentile(sf, 0.95),
+                medianCagr: percentile(sc, 0.5),
+                medianDd: percentile(sd, 0.5), worstDd5: percentile(sd, 0.05),
+                probLoss: (losers / paths) * 100,
+            };
+        }
+
+        function FanChart({ bands, invested, years }) {
+            const [hover, setHover] = useState(null);
+            const W = 800, H = 320, m = { l: 64, r: 72, t: 16, b: 36 };
+            const iw = W - m.l - m.r, ih = H - m.t - m.b;
+            const n = bands.length - 1;
+            const yMax = Math.max(...bands.map(b => b.p95), invested) * 1.05;
+            const x = i => m.l + (i / n) * iw;
+            const y = v => m.t + ih - (v / yMax) * ih;
+            const line = key => bands.map((b, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(b[key]).toFixed(1)}`).join('');
+            const area = bands.map((b, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(b.p95).toFixed(1)}`).join('')
+                + bands.slice().reverse().map((b, j) => `L${x(n - j).toFixed(1)},${y(b.p5).toFixed(1)}`).join('') + 'Z';
+            const yTicks = Array.from({ length: 5 }, (_, i) => (yMax / 4) * i);
+            const step = years <= 10 ? 1 : years <= 20 ? 2 : 5;
+            const xTicks = Array.from({ length: Math.floor(years / step) + 1 }, (_, i) => i * step);
+            const fmtAxis = v => v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : `${Math.round(v / 1e3)}K`;
+            const last = bands[n];
+
+            const onMove = (e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const px = ((e.clientX - rect.left) / rect.width) * W;
+                const i = Math.round(((px - m.l) / iw) * n);
+                setHover(i >= 0 && i <= n ? i : null);
+            };
+            const hb = hover !== null ? bands[hover] : null;
+
+            return (
+                <div className="relative">
+                    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="กราฟพัดแสดงช่วงมูลค่าพอร์ตจำลอง P5 ถึง P95 และค่ามัธยฐาน">
+                        {yTicks.map(v => (
+                            <g key={v}>
+                                <line x1={m.l} x2={W - m.r} y1={y(v)} y2={y(v)} stroke="#334155" strokeWidth="1" />
+                                <text x={m.l - 8} y={y(v) + 4} textAnchor="end" fontSize="11" fill="#94a3b8">{fmtAxis(v)}</text>
+                            </g>
+                        ))}
+                        {xTicks.map(t => (
+                            <text key={t} x={x(t * 12)} y={H - m.b + 18} textAnchor="middle" fontSize="11" fill="#94a3b8">{t === 0 ? 'เริ่ม' : `ปี ${t}`}</text>
+                        ))}
+                        <path d={area} fill="#818cf8" fillOpacity="0.18" />
+                        <line x1={m.l} x2={W - m.r} y1={y(invested)} y2={y(invested)} stroke="#94a3b8" strokeWidth="1" strokeDasharray="4 4" />
+                        <path d={line('p95')} fill="none" stroke="#818cf8" strokeOpacity="0.5" strokeWidth="1" />
+                        <path d={line('p5')} fill="none" stroke="#818cf8" strokeOpacity="0.5" strokeWidth="1" />
+                        <path d={line('p50')} fill="none" stroke="#818cf8" strokeWidth="2" strokeLinejoin="round" />
+                        <text x={W - m.r + 6} y={y(last.p95) + 4} fontSize="11" fill="#cbd5e1">P95</text>
+                        <text x={W - m.r + 6} y={y(last.p50) + 4} fontSize="11" fill="#f1f5f9" fontWeight="600">มัธยฐาน</text>
+                        <text x={W - m.r + 6} y={y(last.p5) + 4} fontSize="11" fill="#cbd5e1">P5</text>
+                        <text x={m.l + 4} y={y(invested) - 6} fontSize="11" fill="#94a3b8">เงินลงทุนรวม</text>
+                        {hb && (
+                            <g>
+                                <line x1={x(hover)} x2={x(hover)} y1={m.t} y2={m.t + ih} stroke="#cbd5e1" strokeWidth="1" />
+                                <circle cx={x(hover)} cy={y(hb.p50)} r="4" fill="#818cf8" stroke="#1e293b" strokeWidth="2" />
+                            </g>
+                        )}
+                        <rect x={m.l} y={m.t} width={iw} height={ih} fill="transparent" onMouseMove={onMove} onMouseLeave={() => setHover(null)} />
+                    </svg>
+                    {hb && (
+                        <div className="absolute top-2 pointer-events-none bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-xs shadow-xl"
+                             style={{ left: `${(x(hover) / W) * 100}%`, transform: hover > n / 2 ? 'translateX(calc(-100% - 12px))' : 'translateX(12px)' }}>
+                            <div className="text-slate-400 mb-1">ปีที่ {Math.floor(hover / 12)} เดือนที่ {hover % 12}</div>
+                            <div className="text-slate-300">P95: <span className="font-semibold text-white">{fmtThb(hb.p95)}</span></div>
+                            <div className="text-slate-300">มัธยฐาน: <span className="font-semibold text-white">{fmtThb(hb.p50)}</span></div>
+                            <div className="text-slate-300">P5: <span className="font-semibold text-white">{fmtThb(hb.p5)}</span></div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
 
         function App() {
             // --- Active Tab ---
@@ -48,6 +211,21 @@
             const [strikePrice, setStrikePrice] = useState(95);
             const [premiumReceived, setPremiumReceived] = useState(3.5);
             const [targetTestPrice, setTargetTestPrice] = useState(88);
+
+            // --- 4. Monte Carlo Backtest State ---
+            const [initialCapital, setInitialCapital] = useState(1000000);
+            const [monthlyContribution, setMonthlyContribution] = useState(10000);
+            const [years, setYears] = useState(10);
+            const [numPaths, setNumPaths] = useState(500);
+            const [seed, setSeed] = useState(42);
+            const [assumptions, setAssumptions] = useState(ASSETS);
+
+            const backtest = useMemo(() => {
+                if (activeTab !== 'backtest' || totalWeight <= 0) return null;
+                // Normalize so the simulation always uses a fully invested portfolio
+                const weights = ASSETS.map(a => portfolio[a.key] / totalWeight);
+                return runMonteCarlo({ weights, assumptions, initial: initialCapital, monthly: monthlyContribution, years, paths: numPaths, seed });
+            }, [activeTab, portfolio, totalWeight, assumptions, initialCapital, monthlyContribution, years, numPaths, seed]);
 
             // --- Stress Test Calculation ---
             const scenarioResults = useMemo(() => {
@@ -153,8 +331,8 @@
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                             <div>
                                 <span className="bg-indigo-500/20 text-indigo-400 text-xs px-3 py-1 rounded-full font-semibold uppercase tracking-wider">Quant Testing Sandbox v1.0</span>
-                                <h1 className="text-2xl md:text-3xl font-bold text-white mt-2">ระบบจำลองและทดสอบกลยุทธ์พอร์ตการลงทุน (Stress Test & Options Lab)</h1>
-                                <p className="text-slate-400 text-sm mt-1">ทดสอบสัดส่วน Core-Satellite, จำลองวิกฤตเศรษฐกิจ และคำนวณผลตอบแทน Options Strategies</p>
+                                <h1 className="text-2xl md:text-3xl font-bold text-white mt-2">ระบบจำลองและทดสอบกลยุทธ์พอร์ตการลงทุน (Stress Test, Backtest & Options Lab)</h1>
+                                <p className="text-slate-400 text-sm mt-1">ทดสอบสัดส่วน Core-Satellite, จำลองวิกฤตเศรษฐกิจ, Backtest จำลองสถานการณ์ตลาด (Monte Carlo) และคำนวณผลตอบแทน Options Strategies</p>
                             </div>
                             <div className="bg-slate-900 border border-slate-700 px-4 py-3 rounded-xl text-right">
                                 <div className="text-xs text-slate-400">สัดส่วนพอร์ตสินทรัพย์รวม</div>
@@ -169,6 +347,9 @@
                             </button>
                             <button onClick={() => setActiveTab('options')} className={`px-4 py-2 rounded-xl text-sm font-medium transition ${activeTab === 'options' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' : 'bg-slate-700/50 text-slate-300 hover:bg-slate-700'}`}>
                                 📊 2. Options Strategy Simulator (CSP / CC)
+                            </button>
+                            <button onClick={() => setActiveTab('backtest')} className={`px-4 py-2 rounded-xl text-sm font-medium transition ${activeTab === 'backtest' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' : 'bg-slate-700/50 text-slate-300 hover:bg-slate-700'}`}>
+                                🎲 3. Monte Carlo Backtest
                             </button>
                         </div>
                     </header>
@@ -318,6 +499,157 @@
                             </div>
 
                             <p className="text-xs text-slate-500">คำนวณ ณ วันหมดอายุ ไม่รวมค่าคอมมิชชั่น ภาษี และเงินปันผล เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน</p>
+                        </div>
+                    )}
+
+                    {/* TAB 3: MONTE CARLO BACKTEST */}
+                    {activeTab === 'backtest' && (
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* Left: Inputs & assumptions */}
+                            <div className="bg-slate-800 border border-slate-700 rounded-2xl p-6 shadow-xl space-y-4">
+                                <h3 className="text-lg font-semibold text-white">🎲 ตั้งค่าการจำลอง</h3>
+                                <p className="text-xs text-slate-400">ใช้สัดส่วนพอร์ตจากแท็บ 1 (ปรับให้รวมเป็น 100% อัตโนมัติ) และปรับสมดุลพอร์ตทุกเดือน</p>
+
+                                <div>
+                                    <label className="text-xs text-slate-400 block mb-1">เงินลงทุนเริ่มต้น (THB)</label>
+                                    <input type="number" step="100000" min="0" value={initialCapital} onChange={(e) => setInitialCapital(Math.max(0, Number(e.target.value)))} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white font-bold" />
+                                </div>
+                                <div>
+                                    <label className="text-xs text-slate-400 block mb-1">ลงทุนเพิ่มทุกเดือน (DCA, THB)</label>
+                                    <input type="number" step="1000" min="0" value={monthlyContribution} onChange={(e) => setMonthlyContribution(Math.max(0, Number(e.target.value)))} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white font-bold" />
+                                </div>
+                                <div>
+                                    <div className="flex justify-between text-sm mb-1">
+                                        <span className="text-slate-300">ระยะเวลาลงทุน:</span>
+                                        <span className="font-bold text-indigo-400">{years} ปี</span>
+                                    </div>
+                                    <input type="range" min="1" max="30" value={years} onChange={(e) => setYears(Number(e.target.value))} className="w-full accent-indigo-500" />
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="text-xs text-slate-400 block mb-1">จำนวนเส้นทางจำลอง</label>
+                                        <select value={numPaths} onChange={(e) => setNumPaths(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white font-bold">
+                                            <option value={200}>200</option>
+                                            <option value={500}>500</option>
+                                            <option value={1000}>1,000</option>
+                                            <option value={2000}>2,000</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-slate-400 block mb-1">Random Seed</label>
+                                        <div className="flex gap-1">
+                                            <input type="number" value={seed} onChange={(e) => setSeed(Number(e.target.value))} className="w-full min-w-0 bg-slate-900 border border-slate-600 rounded-lg p-2 text-white font-bold" />
+                                            <button onClick={() => setSeed(Math.floor(Math.random() * 100000))} title="สุ่มใหม่" className="px-2 rounded-lg bg-slate-700/50 hover:bg-slate-700 text-slate-300">🔀</button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <div className="text-sm text-slate-300 mb-2">สมมติฐานรายปีของแต่ละสินทรัพย์</div>
+                                    <table className="w-full text-xs">
+                                        <thead>
+                                            <tr className="text-slate-400 border-b border-slate-700">
+                                                <th className="text-left py-1 font-medium">สินทรัพย์</th>
+                                                <th className="text-right py-1 font-medium">น้ำหนัก</th>
+                                                <th className="text-right py-1 font-medium">ผลตอบแทน %</th>
+                                                <th className="text-right py-1 font-medium">ผันผวน %</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {assumptions.map((a, i) => (
+                                                <tr key={a.key} className="border-b border-slate-700/50">
+                                                    <td className="py-1 text-slate-300">{a.label}</td>
+                                                    <td className="py-1 text-right text-slate-300">{totalWeight > 0 ? ((portfolio[a.key] / totalWeight) * 100).toFixed(0) : 0}%</td>
+                                                    {['mu', 'vol'].map(f => (
+                                                        <td key={f} className="py-1 text-right">
+                                                            <input type="number" step="0.5" min={f === 'vol' ? 0 : -50} value={a[f]}
+                                                                onChange={(e) => setAssumptions(assumptions.map((b, j) => j === i ? { ...b, [f]: f === 'vol' ? Math.max(0, Number(e.target.value)) : Number(e.target.value) } : b))}
+                                                                className="w-14 bg-slate-900 border border-slate-600 rounded p-1 text-right text-white" />
+                                                        </td>
+                                                    ))}
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                    <button onClick={() => setAssumptions(ASSETS)} className="w-full mt-3 px-3 py-2 rounded-xl text-xs font-medium bg-slate-700/50 text-slate-300 hover:bg-slate-700 transition">
+                                        ↺ รีเซ็ตสมมติฐาน
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Right: Results */}
+                            <div className="lg:col-span-2 bg-slate-800 border border-slate-700 rounded-2xl p-6 shadow-xl space-y-6">
+                                {!backtest ? (
+                                    <div className="text-rose-400">กรุณากำหนดสัดส่วนพอร์ตในแท็บ 1 อย่างน้อยหนึ่งสินทรัพย์</div>
+                                ) : (
+                                    <>
+                                        <div>
+                                            <h3 className="text-lg font-semibold text-white">📈 ช่วงมูลค่าพอร์ตที่เป็นไปได้ ({numPaths.toLocaleString('en-US')} เส้นทาง, {years} ปี)</h3>
+                                            <p className="text-xs text-slate-400 mt-1">แถบสีคือช่วง P5–P95 (90% ของเส้นทางจำลองอยู่ในช่วงนี้) เส้นทึบคือค่ามัธยฐาน เส้นประคือเงินลงทุนรวม</p>
+                                        </div>
+
+                                        <FanChart bands={backtest.bands} invested={backtest.invested} years={years} />
+
+                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                            <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                                <div className="text-xs text-slate-400">มูลค่าพอร์ตปลายทาง (มัธยฐาน)</div>
+                                                <div className="text-xl font-bold text-white mt-1">{fmtThb(backtest.p50)}</div>
+                                                <div className="text-xs text-slate-400 mt-1">เงินลงทุนรวม {fmtThb(backtest.invested)}</div>
+                                            </div>
+                                            <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                                <div className="text-xs text-slate-400">กรณีแย่ (P5) / กรณีดี (P95)</div>
+                                                <div className="text-sm font-bold text-white mt-1">{fmtThb(backtest.p5)}</div>
+                                                <div className="text-sm font-bold text-white">{fmtThb(backtest.p95)}</div>
+                                            </div>
+                                            <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                                <div className="text-xs text-slate-400">ผลตอบแทนทบต้นต่อปี (CAGR มัธยฐาน)</div>
+                                                <div className={`text-xl font-bold mt-1 ${backtest.medianCagr >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(backtest.medianCagr)}</div>
+                                                <div className="text-xs text-slate-400 mt-1">วัดแบบ time-weighted ไม่รวมผลของ DCA</div>
+                                            </div>
+                                            <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                                <div className="text-xs text-slate-400">Max Drawdown (มัธยฐาน)</div>
+                                                <div className="text-xl font-bold text-rose-400 mt-1">{backtest.medianDd.toFixed(1)}%</div>
+                                            </div>
+                                            <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                                <div className="text-xs text-slate-400">Max Drawdown กรณีแย่ (P5)</div>
+                                                <div className="text-xl font-bold text-rose-400 mt-1">{backtest.worstDd5.toFixed(1)}%</div>
+                                            </div>
+                                            <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                                <div className="text-xs text-slate-400">โอกาสที่พอร์ตปลายทางต่ำกว่าเงินลงทุนรวม</div>
+                                                <div className="text-xl font-bold text-amber-400 mt-1">{backtest.probLoss.toFixed(1)}%</div>
+                                            </div>
+                                        </div>
+
+                                        <details className="bg-slate-900/60 border border-slate-700 rounded-xl p-4">
+                                            <summary className="cursor-pointer text-sm text-slate-300">ดูตารางมูลค่าพอร์ตรายปี</summary>
+                                            <div className="overflow-x-auto mt-3">
+                                                <table className="w-full text-xs">
+                                                    <thead>
+                                                        <tr className="text-slate-400 border-b border-slate-700">
+                                                            <th className="text-left py-1 font-medium">ปี</th>
+                                                            <th className="text-right py-1 font-medium">P5</th>
+                                                            <th className="text-right py-1 font-medium">มัธยฐาน</th>
+                                                            <th className="text-right py-1 font-medium">P95</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {backtest.bands.filter((_, i) => i % 12 === 0).map((b, yr) => (
+                                                            <tr key={yr} className="border-b border-slate-700/50 text-slate-300">
+                                                                <td className="py-1">{yr}</td>
+                                                                <td className="py-1 text-right">{fmtThb(b.p5)}</td>
+                                                                <td className="py-1 text-right">{fmtThb(b.p50)}</td>
+                                                                <td className="py-1 text-right">{fmtThb(b.p95)}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </details>
+
+                                        <p className="text-xs text-slate-500">จำลองแบบ Monte Carlo ด้วยผลตอบแทนรายเดือนแบบ lognormal ที่มีสหสัมพันธ์ระหว่างสินทรัพย์ (หุ้นสหรัฐฯ–หุ้นไทย 0.6, พันธบัตร–หุ้นสหรัฐฯ −0.1) สมมติฐานเป็นค่าสมมติ ไม่ใช่ข้อมูลในอดีตจริง ไม่รวมค่าธรรมเนียมและภาษี ผลลัพธ์ไม่ใช่การรับประกันและไม่ใช่คำแนะนำการลงทุน</p>
+                                    </>
+                                )}
+                            </div>
                         </div>
                     )}
                 </div>
