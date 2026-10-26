@@ -70,17 +70,25 @@ def test_load_benchmarks_skips_short_series(tmp_path):
     assert names == ['TDEX']
 
 
-def test_export_sandbox_data_writes_rebased_series(tmp_path):
-    folder = tmp_path / 'index'
-    folder.mkdir()
-    idx = weekly(60)
-    close = 10 * 1.01 ** np.arange(60)
-    pd.DataFrame({'Date': idx, 'Close': close, 'Adj Close': close}).to_csv(folder / 'TDEX.csv', index=False)
-    pd.DataFrame({'Date': idx[:1], 'Close': [1.0], 'Adj Close': [1.0]}).to_csv(folder / 'SET.csv', index=False)
+def test_export_sandbox_data_aligns_and_converts_to_baht(tmp_path):
+    def write(rel, dates, close):
+        f = tmp_path / rel
+        f.parent.mkdir(exist_ok=True)
+        pd.DataFrame({'Date': dates, 'Close': close, 'Adj Close': close}).to_csv(f, index=False)
+
+    idx = weekly(80)
+    write('index/TDEX.csv', idx, 10 * 1.01 ** np.arange(80))
+    write('assets/QQQ.csv', idx[20:], 50 * 1.02 ** np.arange(60))      # starts later
+    write('assets/USDTHB.csv', idx, 30 * 1.001 ** np.arange(80))
+    write('assets/SPY.csv', idx[:1], [1.0])                             # too short, skipped
     out = tmp_path / 'sandbox-data.js'
-    data = a.export_sandbox_data(str(out), str(folder))
-    assert list(data['series']) == ['TDEX']      # one-row SET file is skipped
-    tdex = data['series']['TDEX']
-    assert tdex['values'][0] == 100 and np.isclose(tdex['values'][-1], 100 * 1.01 ** 59, rtol=1e-4)
-    assert data['asOf'] == tdex['dates'][-1]
+    data = a.export_sandbox_data(str(out), str(tmp_path))
+
+    assert set(data['series']) == {'TDEX', 'QQQ', 'QQQ_THB'}
+    assert len(data['dates']) == 80 and data['asOf'] == data['dates'][-1]
+    assert data['series']['TDEX'][0] == 100
+    qqq, thb = data['series']['QQQ'], data['series']['QQQ_THB']
+    assert qqq[:20] == [None] * 20 and qqq[20] == 100
+    # baht return = USD return x currency return
+    assert np.isclose(thb[-1] / thb[20], (qqq[-1] / qqq[20]) * 1.001 ** 59, rtol=1e-4)
     assert out.read_text().splitlines()[1].startswith('window.SANDBOX_DATA = {')

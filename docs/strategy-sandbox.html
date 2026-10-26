@@ -123,9 +123,21 @@
             };
         }
 
-        // --- Historical backtest on real weekly data (TDEX, SET50 ETF, total return) ---
-        const HIST = (window.SANDBOX_DATA && window.SANDBOX_DATA.series && window.SANDBOX_DATA.series.TDEX) || null;
-        const THAI_INDEX = ASSETS.findIndex(a => a.key === 'thaiDividend');
+        // --- Historical backtest on real weekly data (total return, from sandbox-data.js) ---
+        // TDEX (SET50 ETF) for the Thai sleeve and benchmark; ABFTH (Thai government bond ETF) for Core;
+        // QQQ or SPY for US Tech, in baht (_THB) when the USD/THB rate is available. Cash stays an assumption.
+        const SD = window.SANDBOX_DATA || null;
+        const HIST = SD && Array.isArray(SD.dates) && SD.series && SD.series.TDEX ? SD : null;
+        const seriesStart = key => {
+            const s = HIST && key && HIST.series[key];
+            const i = s ? s.findIndex(v => v != null) : -1;
+            return i >= 0 ? HIST.dates[i] : null;
+        };
+        function sleeveKeys(usProxy, inBaht) {
+            const us = inBaht && HIST.series[`${usProxy}_THB`] ? `${usProxy}_THB` : (HIST.series[usProxy] ? usProxy : null);
+            const bySleeve = { coreBondsRMF: HIST.series.ABFTH ? 'ABFTH' : null, usTechEquities: us, thaiDividend: 'TDEX', cashGold: null };
+            return ASSETS.map(a => bySleeve[a.key]);
+        }
         const PORT_COLOR = '#6366f1', BENCH_COLOR = '#d97706';
 
         function seriesStats(weekly, dates, rf) {
@@ -152,10 +164,12 @@
             };
         }
 
-        // Thai sleeve follows TDEX week by week; the other sleeves grow at their assumed annual rate.
-        // DCA goes in and the portfolio rebalances to target in the first week of each month.
-        function runHistorical({ weights, assumptions, initial, monthly, startYear, endYear }) {
-            const { dates, values } = HIST;
+        // Each sleeve follows its real series where it has data for the week, otherwise it grows at its
+        // assumed annual rate. DCA goes in and the portfolio rebalances to target in the first week of each month.
+        function runHistorical({ weights, assumptions, keys, initial, monthly, startYear, endYear }) {
+            const { dates } = HIST;
+            const values = HIST.series.TDEX;
+            const real = ASSETS.map(() => 0);
             const idx = [];
             dates.forEach((d, i) => { const y = +d.slice(0, 4); if (y >= startYear && y <= endYear) idx.push(i); });
             if (idx.length < 53) return null;
@@ -167,7 +181,11 @@
                 const i = idx[k];
                 const thaiR = values[i] / values[i - 1] - 1;
                 const before = hold.reduce((s, h) => s + h, 0);
-                hold = hold.map((h, j) => h * (1 + (j === THAI_INDEX ? thaiR : fixed[j])));
+                hold = hold.map((h, j) => {
+                    const s = keys[j] && HIST.series[keys[j]];
+                    if (s && s[i] != null && s[i - 1] != null) { real[j]++; return h * (s[i] / s[i - 1]); }
+                    return h * (1 + fixed[j]);
+                });
                 const after = hold.reduce((s, h) => s + h, 0);
                 out.weeklyPort.push(before > 0 ? after / before - 1 : 0);
                 out.weeklyBench.push(thaiR);
@@ -188,7 +206,9 @@
             const rf = assumptions[ASSETS.findIndex(a => a.key === 'cashGold')].mu;
             out.statsPort = seriesStats(out.weeklyPort, out.dates, rf);
             out.statsBench = seriesStats(out.weeklyBench, out.dates, rf);
-            out.thaiWeight = weights[THAI_INDEX];
+            out.keys = keys;
+            out.coverage = real.map(c => c / (idx.length - 1));
+            out.realShare = weights.reduce((sum, w, j) => sum + w * out.coverage[j], 0);
             return out;
         }
 
@@ -270,7 +290,8 @@
                 return <div className="text-rose-400 text-sm">ช่วงเวลาสั้นเกินไปหรือไม่มีสัดส่วนพอร์ต กรุณาเลือกอย่างน้อย 1 ปีเต็มและกำหนดสัดส่วนในแท็บ 1</div>;
             }
             const p = result.statsPort, b = result.statsBench, n = result.dates.length - 1;
-            const realShare = result.thaiWeight * 100;
+            const realShare = result.realShare * 100;
+            const used = result.keys.map((k, j) => k && result.coverage[j] > 0 ? `${ASSETS[j].label} = ${k.replace('_THB', ' (บาท)')}${result.coverage[j] < 0.995 ? ` ${(result.coverage[j] * 100).toFixed(0)}% ของช่วง` : ''}` : null).filter(Boolean);
             const rows = [
                 ['มูลค่าปลายทาง', fmtThb(result.port[n]), fmtThb(result.bench[n])],
                 ['CAGR (time-weighted)', fmtPct(p.cagr), fmtPct(b.cagr)],
@@ -285,15 +306,15 @@
                 <>
                     <div>
                         <h3 className="text-lg font-semibold text-white">📈 Backtest ด้วยข้อมูลจริง ({result.dates[0]} ถึง {result.dates[n]}, {n} สัปดาห์)</h3>
-                        <p className="text-xs text-slate-400 mt-1">ฝั่งหุ้นไทยใช้ผลตอบแทนรวมปันผลรายสัปดาห์จริงของ TDEX (ETF อ้างอิง SET50) เทียบกับการลงทุนใน TDEX 100% ด้วยเงินก้อนแรกและ DCA เท่ากัน</p>
+                        <p className="text-xs text-slate-400 mt-1">ใช้ผลตอบแทนรวมปันผลรายสัปดาห์จริง: {used.join(', ')} เทียบกับการลงทุนใน TDEX 100% ด้วยเงินก้อนแรกและ DCA เท่ากัน</p>
                     </div>
 
                     <HistChart result={result} />
 
                     {realShare < 99.5 && (
                         <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl p-3 text-xs text-amber-200">
-                            ⚠️ มีเพียง {realShare.toFixed(0)}% ของพอร์ต (ฝั่งหุ้นไทย) ที่ใช้ข้อมูลจริง อีก {(100 - realShare).toFixed(0)}% เติบโตคงที่ตามสมมติฐานโดยไม่มีความผันผวน
-                            ความผันผวน, Max Drawdown และ Sharpe ของพอร์ตจึงดูดีเกินจริง ใช้เปรียบเทียบผลของการลดสัดส่วนหุ้นไทยได้ แต่ไม่ควรตีความเป็นความเสี่ยงจริงของทั้งพอร์ต
+                            ⚠️ ข้อมูลจริงครอบคลุม {realShare.toFixed(0)}% ของพอร์ต (ถ่วงตามน้ำหนักและจำนวนสัปดาห์) อีก {(100 - realShare).toFixed(0)}% เติบโตคงที่ตามสมมติฐานโดยไม่มีความผันผวน
+                            {realShare < 85 ? ' ความผันผวน, Max Drawdown และ Sharpe ของพอร์ตจึงดูดีเกินจริง ไม่ควรตีความเป็นความเสี่ยงจริงของทั้งพอร์ต' : ' ส่วนใหญ่คือเงินสด ซึ่งผันผวนน้อยอยู่แล้ว ตัวชี้วัดความเสี่ยงจึงใกล้เคียงความจริง'}
                         </div>
                     )}
 
@@ -353,8 +374,9 @@
                     </details>
 
                     <p className="text-xs text-slate-500">
-                        ข้อมูล TDEX ถึงสัปดาห์ {window.SANDBOX_DATA.asOf} จาก Yahoo Finance ผ่าน analytics.py (รวมปันผล หักค่าธรรมเนียมกองทุนแล้วในราคา) ใช้ TDEX แทนสินทรัพย์ฝั่ง Thai Dividend & REITs/IFFs จึงไม่สะท้อนหุ้นปันผลหรือกองทุนโครงสร้างพื้นฐานโดยตรง
-                        ส่วนพันธบัตร หุ้นสหรัฐฯ และเงินสดใน repo ยังไม่มีข้อมูลจริง จึงเติบโตคงที่ตามผลตอบแทนที่สมมติไว้ทุกสัปดาห์ ทำให้ความผันผวนและ drawdown ของพอร์ตต่ำกว่าความจริง
+                        ข้อมูลถึงสัปดาห์ {HIST.asOf} จาก Yahoo Finance ผ่าน download.py และ analytics.py (ราคา ETF รวมปันผลและหักค่าธรรมเนียมกองทุนแล้ว)
+                        ตัวแทนแต่ละฝั่ง: TDEX (SET50) แทน Thai Dividend & REITs/IFFs จึงไม่สะท้อนหุ้นปันผลหรือกองทุนโครงสร้างพื้นฐานโดยตรง, ABFTH (พันธบัตรรัฐบาลไทย) แทน Core พันธบัตร/RMF, QQQ หรือ SPY แทน US Tech / Global
+                        ซึ่งเมื่อแปลงเป็นบาทจะรวมผลของค่าเงิน USD/THB ด้วย ส่วนเงินสด และสินทรัพย์ที่ยังไม่มีข้อมูลในช่วงที่เลือก เติบโตคงที่ตามผลตอบแทนที่สมมติไว้ทุกสัปดาห์
                         Sharpe ใช้ผลตอบแทนเงินสดที่สมมติเป็นอัตราปลอดความเสี่ยง ไม่รวมภาษีและค่าซื้อขาย ผลในอดีตไม่ได้รับประกันผลในอนาคตและไม่ใช่คำแนะนำการลงทุน
                     </p>
                 </>
@@ -468,6 +490,9 @@
             }, [activeTab, portfolio, totalWeight, assumptions, initialCapital, monthlyContribution, years, numPaths, seed]);
 
             // --- 5. Historical Backtest State (real TDEX data) ---
+            const [usProxy, setUsProxy] = useState(HIST && !HIST.series.QQQ && HIST.series.SPY ? 'SPY' : 'QQQ');
+            const [inBaht, setInBaht] = useState(true);
+            const histKeys = HIST ? sleeveKeys(usProxy, inBaht) : ASSETS.map(() => null);
             const histFirstYear = HIST ? +HIST.dates[0].slice(0, 4) : 2010;
             const histLastYear = HIST ? +HIST.dates[HIST.dates.length - 1].slice(0, 4) : 2010;
             const [btMode, setBtMode] = useState(HIST ? 'hist' : 'mc'); // 'hist' (real data) or 'mc' (Monte Carlo)
@@ -478,8 +503,8 @@
             const histResult = useMemo(() => {
                 if (activeTab !== 'backtest' || btMode !== 'hist' || !HIST || totalWeight <= 0) return null;
                 const weights = ASSETS.map(a => portfolio[a.key] / totalWeight);
-                return runHistorical({ weights, assumptions, initial: initialCapital, monthly: monthlyContribution, startYear, endYear });
-            }, [activeTab, btMode, portfolio, totalWeight, assumptions, initialCapital, monthlyContribution, startYear, endYear]);
+                return runHistorical({ weights, assumptions, keys: histKeys, initial: initialCapital, monthly: monthlyContribution, startYear, endYear });
+            }, [activeTab, btMode, portfolio, totalWeight, assumptions, initialCapital, monthlyContribution, startYear, endYear, usProxy, inBaht]);
 
             // --- Stress Test Calculation ---
             const scenarioResults = useMemo(() => {
@@ -586,7 +611,7 @@
                             <div>
                                 <span className="bg-indigo-500/20 text-indigo-400 text-xs px-3 py-1 rounded-full font-semibold uppercase tracking-wider">Quant Testing Sandbox v1.0</span>
                                 <h1 className="text-2xl md:text-3xl font-bold text-white mt-2">ระบบจำลองและทดสอบกลยุทธ์พอร์ตการลงทุน (Stress Test, Backtest & Options Lab)</h1>
-                                <p className="text-slate-400 text-sm mt-1">ทดสอบสัดส่วน Core-Satellite, จำลองวิกฤตเศรษฐกิจ, Backtest ด้วยข้อมูลจริง TDEX และจำลองสถานการณ์ตลาด (Monte Carlo) และคำนวณผลตอบแทน Options Strategies</p>
+                                <p className="text-slate-400 text-sm mt-1">ทดสอบสัดส่วน Core-Satellite, จำลองวิกฤตเศรษฐกิจ, Backtest ด้วยข้อมูลจริง (TDEX, ABFTH, QQQ/SPY) และจำลองสถานการณ์ตลาด (Monte Carlo) และคำนวณผลตอบแทน Options Strategies</p>
                             </div>
                             <div className="bg-slate-900 border border-slate-700 px-4 py-3 rounded-xl text-right">
                                 <div className="text-xs text-slate-400">สัดส่วนพอร์ตสินทรัพย์รวม</div>
@@ -764,7 +789,7 @@
                                 <h3 className="text-lg font-semibold text-white">🎲 ตั้งค่า Backtest</h3>
                                 <div className="grid grid-cols-2 gap-2">
                                     <button onClick={() => setBtMode('hist')} className={`p-2 rounded-xl text-xs font-medium border transition ${btMode === 'hist' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-300'}`}>
-                                        📜 ข้อมูลจริง (TDEX)
+                                        📜 ข้อมูลจริง (ETF)
                                     </button>
                                     <button onClick={() => setBtMode('mc')} className={`p-2 rounded-xl text-xs font-medium border transition ${btMode === 'mc' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-300'}`}>
                                         🎲 Monte Carlo
@@ -794,6 +819,17 @@
                                                 {histYears.map(yr => <option key={yr} value={yr}>{yr}</option>)}
                                             </select>
                                         </div>
+                                        <div>
+                                            <label className="text-xs text-slate-400 block mb-1">ตัวแทนหุ้นสหรัฐฯ</label>
+                                            <select value={usProxy} onChange={(e) => setUsProxy(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white font-bold">
+                                                <option value="QQQ" disabled={!HIST.series.QQQ}>QQQ (Nasdaq-100){HIST.series.QQQ ? '' : ' - ยังไม่มีข้อมูล'}</option>
+                                                <option value="SPY" disabled={!HIST.series.SPY}>SPY (S&amp;P 500){HIST.series.SPY ? '' : ' - ยังไม่มีข้อมูล'}</option>
+                                            </select>
+                                        </div>
+                                        <label className={`flex items-end gap-2 pb-2 text-xs ${HIST.series[`${usProxy}_THB`] ? 'text-slate-300' : 'text-slate-500'}`}>
+                                            <input type="checkbox" checked={inBaht && !!HIST.series[`${usProxy}_THB`]} disabled={!HIST.series[`${usProxy}_THB`]} onChange={(e) => setInBaht(e.target.checked)} className="accent-indigo-500" />
+                                            แปลงเป็นเงินบาท (รวมผลค่าเงิน USD/THB)
+                                        </label>
                                     </div>
                                 )}
                                 {btMode === 'mc' && (<>
@@ -840,10 +876,12 @@
                                                 <tr key={a.key} className="border-b border-slate-700/50">
                                                     <td className="py-1 text-slate-300">{a.label}</td>
                                                     <td className="py-1 text-right text-slate-300">{totalWeight > 0 ? ((portfolio[a.key] / totalWeight) * 100).toFixed(0) : 0}%</td>
-                                                    {btMode === 'hist' && i === THAI_INDEX ? (
-                                                        <td colSpan="2" className="py-1 text-right text-amber-400 font-semibold">ข้อมูลจริง TDEX</td>
+                                                    {btMode === 'hist' && histKeys[i] && seriesStart(histKeys[i]) <= `${startYear}-01-31` ? (
+                                                        <td colSpan="2" className="py-1 text-right text-amber-400 font-semibold">ข้อมูลจริง {histKeys[i].replace('_THB', ' (บาท)')}</td>
                                                     ) : ['mu', 'vol'].map(f => btMode === 'hist' && f === 'vol' ? (
-                                                        <td key={f} className="py-1 text-right text-slate-500" title="โหมดข้อมูลจริง: สินทรัพย์นี้เติบโตคงที่ ไม่มีความผันผวน">—</td>
+                                                        histKeys[i]
+                                                            ? <td key={f} className="py-1 text-right text-amber-400" title="ก่อนวันนี้ใช้ผลตอบแทนที่สมมติ">จริงตั้งแต่ {seriesStart(histKeys[i]).slice(0, 7)}</td>
+                                                            : <td key={f} className="py-1 text-right text-slate-500" title="โหมดข้อมูลจริง: สินทรัพย์นี้เติบโตคงที่ ไม่มีความผันผวน">—</td>
                                                     ) : (
                                                         <td key={f} className="py-1 text-right">
                                                             <input type="number" step="0.5" min={f === 'vol' ? 0 : -50} value={a[f]}
