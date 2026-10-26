@@ -104,15 +104,18 @@ def load_benchmarks(folder='data/index'):
 
 SANDBOX_SERIES = {'TDEX': 'index/TDEX.csv', 'ABFTH': 'assets/ABFTH.csv', 'QQQ': 'assets/QQQ.csv', 'SPY': 'assets/SPY.csv'}
 SANDBOX_USD = ('QQQ', 'SPY')
+# ABFTH trades thinly (most weeks have no volume), so a single odd-lot print can
+# sit 30% off the fund's value for a week; a bond fund never moves that far
+SANDBOX_MAX_RATIO = {'ABFTH': 1.10}
 
 
-def _total_return_from_csv(path):
+def _total_return_from_csv(path, max_ratio=1.8):
     if not os.path.exists(path):
         return None
     df = pd.read_csv(path, parse_dates=['Date']).drop_duplicates('Date', keep='last').set_index('Date').sort_index()
     df = df.where(df > 0)
     adj = df['Adj Close'] if 'Adj Close' in df else df['Close']
-    tri = total_return_index(clean_prices(df['Close']), adj).dropna()
+    tri = total_return_index(clean_prices(df['Close'], max_ratio=max_ratio), adj).dropna()
     return tri if len(tri) > WEEKS_PER_YEAR else None
 
 
@@ -128,7 +131,8 @@ def export_sandbox_data(path='docs/sandbox-data.js', data_dir='data'):
     with a <script> tag when opened straight from disk (fetch() can't read
     local files).
     """
-    found = {name: _total_return_from_csv(os.path.join(data_dir, rel)) for name, rel in SANDBOX_SERIES.items()}
+    found = {name: _total_return_from_csv(os.path.join(data_dir, rel), SANDBOX_MAX_RATIO.get(name, 1.8))
+             for name, rel in SANDBOX_SERIES.items()}
     if found['TDEX'] is None:
         return None
     weeks = found['TDEX'].index

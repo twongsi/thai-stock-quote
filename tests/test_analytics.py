@@ -92,3 +92,15 @@ def test_export_sandbox_data_aligns_and_converts_to_baht(tmp_path):
     # baht return = USD return x currency return
     assert np.isclose(thb[-1] / thb[20], (qqq[-1] / qqq[20]) * 1.001 ** 59, rtol=1e-4)
     assert out.read_text().splitlines()[1].startswith('window.SANDBOX_DATA = {')
+
+
+def test_export_sandbox_data_drops_odd_lot_print_in_bond_etf(tmp_path):
+    idx = weekly(60)
+    for rel, close in [('index/TDEX.csv', np.full(60, 10.0)), ('assets/ABFTH.csv', np.full(60, 1300.0))]:
+        f = tmp_path / rel
+        f.parent.mkdir(exist_ok=True)
+        if 'ABFTH' in rel:
+            close[30] = 950.0                      # one thin trade 27% below, back the next week
+        pd.DataFrame({'Date': idx, 'Close': close, 'Adj Close': close}).to_csv(f, index=False)
+    data = a.export_sandbox_data(str(tmp_path / 'out.js'), str(tmp_path))
+    assert np.allclose(data['series']['ABFTH'], 100)
