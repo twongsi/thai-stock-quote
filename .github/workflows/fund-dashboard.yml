@@ -1,4 +1,6 @@
-# อัปเดตข้อมูลกองทุนจาก SEC Open Data API แล้ว deploy dashboard ขึ้น GitHub Pages
+# อัปเดตข้อมูลกองทุนจาก SEC Open Data API แล้ว deploy GitHub Pages ของ repo นี้
+# หน้าแรก = RRG Studio (rrg/docs), dashboard กองทุนอยู่ที่ /fund/
+# rrg-weekly.yml สั่งรัน workflow นี้หลังอัปเดต RRG ทุกวันเสาร์
 #
 # ตั้งค่าครั้งเดียวก่อนใช้งาน
 #   1. Settings → Secrets and variables → Actions → New repository secret
@@ -25,6 +27,7 @@ on:
     paths:
       - 'fund_dashboard/**'
       - '.github/workflows/fund-dashboard.yml'
+      - 'rrg/docs/**'
 
 permissions:
   contents: read
@@ -65,16 +68,22 @@ jobs:
         run: |
           if [ -z "${SEC_API_KEY}" ]; then
             echo "::warning title=ไม่พบ SEC_API_KEY::build ด้วยข้อมูลจำลองแทน — ใส่ secret SEC_API_KEY เพื่อใช้ข้อมูลจริง"
-            python3 build_static.py --demo --out ../site --years "${SEC_HISTORY_YEARS}"
+            python3 build_static.py --demo --out ../site/fund --years "${SEC_HISTORY_YEARS}"
           else
-            python3 build_static.py --out ../site --years "${SEC_HISTORY_YEARS}"
+            python3 build_static.py --out ../site/fund --years "${SEC_HISTORY_YEARS}"
           fi
 
       - name: สรุปผลการ build
-        run: cat site/summary.md >> "$GITHUB_STEP_SUMMARY"
+        run: cat site/fund/summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: เอาไฟล์สรุปออกก่อน deploy
-        run: rm -f site/summary.md
+        run: rm -f site/fund/summary.md
+
+      # GitHub Pages มีได้เว็บเดียวต่อ repo จึงรวม RRG Studio ไว้ที่หน้าแรก
+      - name: ใส่ RRG Studio ที่หน้าแรกของเว็บ
+        run: |
+          cp -r rrg/docs/. site/
+          touch site/.nojekyll
 
       - uses: actions/upload-pages-artifact@v3
         with:
