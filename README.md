@@ -14,11 +14,13 @@ consensus_history.py -> history of the daily consensus snapshots and each stock'
 
 analytics.py -> risk/return metrics, multi-factor screener (momentum, volatility, dividend yield, consensus upside) and a 12-1 momentum backtest, written to reports/
 
+rrg/ -> RRG Studio (relative rotation graph page for SET industry/sector baskets, world indices in USD, US ETFs and stocks, with CSV upload) and sector_rotation.py (sector index, RS-Ratio/RS-Momentum, scoring and backtest). See rrg/README.md and rrg/WORKFLOW.md (Thai)
+
 recon.py -> map how a web page delivers its data (tables, forms, JS endpoints, HAR captures) before writing a scraper
 
 ## Automation
 
-.github/workflows/update-data.yml runs all of the above on weekdays at 18:40 Bangkok time and commits the results. It can also be started by hand from the Actions tab. .github/workflows/ci.yml runs the tests on every push.
+.github/workflows/update-data.yml runs all of the above on weekdays at 18:40 Bangkok time and commits the results. It can also be started by hand from the Actions tab. .github/workflows/ci.yml runs the tests on every push. .github/workflows/rrg-weekly.yml rebuilds the RRG Studio page and sector rotation report on Saturdays and can deploy rrg/docs to GitHub Pages.
 
 ## Setup
 
