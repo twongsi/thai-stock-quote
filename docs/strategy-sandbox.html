@@ -22,7 +22,22 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useMemo } = React;
+        const { useState, useMemo, useRef, useEffect } = React;
+
+        // Chart width in CSS pixels, so the SVG is drawn at the size it is shown and its
+        // 11px labels stay 11px on a phone instead of being scaled down with the drawing
+        function useChartWidth() {
+            const ref = useRef(null);
+            const [width, setWidth] = useState(800);
+            useEffect(() => {
+                const el = ref.current;
+                if (!el || typeof ResizeObserver === 'undefined') return;
+                const ro = new ResizeObserver(([entry]) => setWidth(Math.max(260, Math.round(entry.contentRect.width))));
+                ro.observe(el);
+                return () => ro.disconnect();
+            }, []);
+            return [ref, width];
+        }
 
         const fmtPct = (v) => (v >= 0 ? `+${v.toFixed(2)}%` : `${v.toFixed(2)}%`);
         const fmtUsd = (v) => (v >= 0 ? `+${v.toFixed(2)} USD` : `${v.toFixed(2)} USD`);
@@ -214,7 +229,9 @@
 
         function HistChart({ result }) {
             const [hoverRaw, setHover] = useState(null);
-            const W = 800, H = 320, m = { l: 64, r: 96, t: 16, b: 36 };
+            const [boxRef, W] = useChartWidth();
+            const narrow = W < 500;
+            const H = narrow ? 240 : 320, m = { l: narrow ? 44 : 64, r: narrow ? 52 : 96, t: 16, b: 36 };
             const iw = W - m.l - m.r, ih = H - m.t - m.b;
             const { dates, port, bench, invested } = result;
             const n = dates.length - 1;
@@ -225,7 +242,7 @@
             const path = vals => vals.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
             const yTicks = Array.from({ length: 5 }, (_, i) => (yMax / 4) * i);
             const yearStarts = dates.map((d, i) => [d.slice(0, 4), i]).filter(([yr], i) => i === 0 || yr !== dates[i - 1].slice(0, 4));
-            const every = Math.ceil(yearStarts.length / 8);
+            const every = Math.ceil(yearStarts.length / (narrow ? 4 : 8));
             const fmtAxis = v => v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : `${Math.round(v / 1e3)}K`;
             // Keep the two end labels from overlapping
             let yPort = y(port[n]), yBench = y(bench[n]);
@@ -239,7 +256,7 @@
             };
 
             return (
-                <div className="relative">
+                <div className="relative" ref={boxRef}>
                     <div className="flex flex-wrap gap-4 text-xs text-slate-300 mb-2">
                         <span className="flex items-center gap-2"><span className="inline-block w-4 h-0.5" style={{ background: PORT_COLOR }}></span>พอร์ตของคุณ</span>
                         <span className="flex items-center gap-2"><span className="inline-block w-4 h-0.5" style={{ background: BENCH_COLOR }}></span>TDEX 100% (เงินลงทุนเท่ากัน)</span>
@@ -385,7 +402,9 @@
 
         function FanChart({ bands, invested, years }) {
             const [hover, setHover] = useState(null);
-            const W = 800, H = 320, m = { l: 64, r: 72, t: 16, b: 36 };
+            const [boxRef, W] = useChartWidth();
+            const narrow = W < 500;
+            const H = narrow ? 240 : 320, m = { l: narrow ? 44 : 64, r: narrow ? 60 : 72, t: 16, b: 36 };
             const iw = W - m.l - m.r, ih = H - m.t - m.b;
             const n = bands.length - 1;
             const yMax = Math.max(...bands.map(b => b.p95), invested) * 1.05;
@@ -395,7 +414,7 @@
             const area = bands.map((b, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(b.p95).toFixed(1)}`).join('')
                 + bands.slice().reverse().map((b, j) => `L${x(n - j).toFixed(1)},${y(b.p5).toFixed(1)}`).join('') + 'Z';
             const yTicks = Array.from({ length: 5 }, (_, i) => (yMax / 4) * i);
-            const step = years <= 10 ? 1 : years <= 20 ? 2 : 5;
+            const step = narrow ? (years <= 8 ? 2 : years <= 20 ? 5 : 10) : (years <= 10 ? 1 : years <= 20 ? 2 : 5);
             const xTicks = Array.from({ length: Math.floor(years / step) + 1 }, (_, i) => i * step);
             const fmtAxis = v => v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : `${Math.round(v / 1e3)}K`;
             const last = bands[n];
@@ -409,7 +428,7 @@
             const hb = hover !== null ? bands[hover] : null;
 
             return (
-                <div className="relative">
+                <div className="relative" ref={boxRef}>
                     <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="กราฟพัดแสดงช่วงมูลค่าพอร์ตจำลอง P5 ถึง P95 และค่ามัธยฐาน">
                         {yTicks.map(v => (
                             <g key={v}>
