@@ -1,0 +1,987 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Portfolio & Strategy Testing Sandbox</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM (pinned versions) -->
+    <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+    <!-- Weekly TDEX total-return history, written by analytics.py (optional; enables the historical backtest) -->
+    <script src="sandbox-data.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Prompt', sans-serif; }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useMemo } = React;
+
+        const fmtPct = (v) => (v >= 0 ? `+${v.toFixed(2)}%` : `${v.toFixed(2)}%`);
+        const fmtUsd = (v) => (v >= 0 ? `+${v.toFixed(2)} USD` : `${v.toFixed(2)} USD`);
+        const fmtThb = (v) => `${Math.round(v).toLocaleString('en-US')} THB`;
+
+        // --- Monte Carlo backtest assumptions (hypothetical, annual %) ---
+        const ASSETS = [
+            { key: 'coreBondsRMF', label: 'Core: พันธบัตร/RMF', mu: 3.0, vol: 4.0 },
+            { key: 'usTechEquities', label: 'US Tech / Global', mu: 10.0, vol: 22.0 },
+            { key: 'thaiDividend', label: 'Thai Dividend & REITs/IFFs', mu: 6.0, vol: 15.0 },
+            { key: 'cashGold', label: 'Cash & Short-Term', mu: 1.5, vol: 0.5 },
+        ];
+        // Correlation matrix, same order as ASSETS
+        const CORR = [
+            [1.0, -0.1, 0.1, 0.0],
+            [-0.1, 1.0, 0.6, 0.0],
+            [0.1, 0.6, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+
+        function cholesky(m) {
+            const n = m.length;
+            const L = m.map(() => new Array(n).fill(0));
+            for (let i = 0; i < n; i++) {
+                for (let j = 0; j <= i; j++) {
+                    let s = m[i][j];
+                    for (let k = 0; k < j; k++) s -= L[i][k] * L[j][k];
+                    L[i][j] = i === j ? Math.sqrt(Math.max(s, 0)) : s / L[j][j];
+                }
+            }
+            return L;
+        }
+        const CHOL = cholesky(CORR);
+
+        // Seeded RNG so a run can be reproduced
+        function mulberry32(a) {
+            return function () {
+                a |= 0; a = (a + 0x6D2B79F5) | 0;
+                let t = Math.imul(a ^ (a >>> 15), 1 | a);
+                t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+                return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+            };
+        }
+        function normalPair(rand) {
+            const u = Math.max(rand(), 1e-12), v = rand();
+            const r = Math.sqrt(-2 * Math.log(u));
+            return [r * Math.cos(2 * Math.PI * v), r * Math.sin(2 * Math.PI * v)];
+        }
+        const percentile = (sorted, p) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.round(p * (sorted.length - 1))))];
+
+        // Monthly lognormal returns per asset, correlated via Cholesky, rebalanced monthly to target weights
+        function runMonteCarlo({ weights, assumptions, initial, monthly, years, paths, seed }) {
+            const rand = mulberry32(seed);
+            const months = years * 12;
+            const n = assumptions.length;
+            const drift = assumptions.map(a => (Math.log(1 + a.mu / 100) - 0.5 * (a.vol / 100) ** 2) / 12);
+            const sig = assumptions.map(a => (a.vol / 100) / Math.sqrt(12));
+            const values = Array.from({ length: months + 1 }, () => new Float64Array(paths));
+            const finals = new Float64Array(paths), drawdowns = new Float64Array(paths), cagrs = new Float64Array(paths);
+            const invested = initial + monthly * months;
+            for (let p = 0; p < paths; p++) {
+                let v = initial, peak = 1, maxDd = 0, units = 1; // units: value of 1 THB invested at start (time-weighted)
+                values[0][p] = v;
+                for (let t = 1; t <= months; t++) {
+                    const z = [];
+                    while (z.length < n) z.push(...normalPair(rand));
+                    let r = 0;
+                    for (let i = 0; i < n; i++) {
+                        let e = 0;
+                        for (let k = 0; k <= i; k++) e += CHOL[i][k] * z[k];
+                        r += weights[i] * (Math.exp(drift[i] + sig[i] * e) - 1);
+                    }
+                    v = v * (1 + r) + monthly;
+                    units *= 1 + r;
+                    peak = Math.max(peak, units);
+                    maxDd = Math.min(maxDd, units / peak - 1);
+                    values[t][p] = v;
+                }
+                finals[p] = v;
+                drawdowns[p] = maxDd * 100;
+                cagrs[p] = (Math.pow(units, 1 / years) - 1) * 100;
+            }
+            const bands = values.map(col => {
+                const s = Float64Array.from(col).sort();
+                return { p5: percentile(s, 0.05), p50: percentile(s, 0.5), p95: percentile(s, 0.95) };
+            });
+            const sf = Float64Array.from(finals).sort();
+            const sd = Float64Array.from(drawdowns).sort();
+            const sc = Float64Array.from(cagrs).sort();
+            let losers = 0;
+            for (let p = 0; p < paths; p++) if (finals[p] < invested) losers++;
+            return {
+                bands, invested,
+                p5: percentile(sf, 0.05), p50: percentile(sf, 0.5), p95: percentile(sf, 0.95),
+                medianCagr: percentile(sc, 0.5),
+                medianDd: percentile(sd, 0.5), worstDd5: percentile(sd, 0.05),
+                probLoss: (losers / paths) * 100,
+            };
+        }
+
+        // --- Historical backtest on real weekly data (total return, from sandbox-data.js) ---
+        // TDEX (SET50 ETF) for the Thai sleeve and benchmark; ABFTH (Thai government bond ETF) for Core;
+        // QQQ or SPY for US Tech, in baht (_THB) when the USD/THB rate is available. Cash stays an assumption.
+        const SD = window.SANDBOX_DATA || null;
+        const HIST = SD && Array.isArray(SD.dates) && SD.series && SD.series.TDEX ? SD : null;
+        const seriesStart = key => {
+            const s = HIST && key && HIST.series[key];
+            const i = s ? s.findIndex(v => v != null) : -1;
+            return i >= 0 ? HIST.dates[i] : null;
+        };
+        function sleeveKeys(usProxy, inBaht) {
+            const us = inBaht && HIST.series[`${usProxy}_THB`] ? `${usProxy}_THB` : (HIST.series[usProxy] ? usProxy : null);
+            const bySleeve = { coreBondsRMF: HIST.series.ABFTH ? 'ABFTH' : null, usTechEquities: us, thaiDividend: 'TDEX', cashGold: null };
+            return ASSETS.map(a => bySleeve[a.key]);
+        }
+        const PORT_COLOR = '#6366f1', BENCH_COLOR = '#d97706';
+
+        function seriesStats(weekly, dates, rf) {
+            let twr = 1, peak = 1, maxDd = 0, sum = 0, sumSq = 0;
+            const byYear = {};
+            weekly.forEach((r, k) => {
+                twr *= 1 + r;
+                peak = Math.max(peak, twr);
+                maxDd = Math.min(maxDd, twr / peak - 1);
+                sum += r; sumSq += r * r;
+                const y = dates[k + 1].slice(0, 4);
+                byYear[y] = (byYear[y] ?? 1) * (1 + r);
+            });
+            const n = weekly.length;
+            const years = (new Date(dates[dates.length - 1]) - new Date(dates[0])) / (365.25 * 864e5);
+            const cagr = (Math.pow(twr, 1 / years) - 1) * 100;
+            const vol = Math.sqrt(Math.max(sumSq / n - (sum / n) ** 2, 0) * n / Math.max(n - 1, 1)) * Math.sqrt(52) * 100;
+            const yearly = Object.fromEntries(Object.entries(byYear).map(([y, g]) => [y, (g - 1) * 100]));
+            const yv = Object.values(yearly);
+            return {
+                cagr, vol, maxDd: maxDd * 100, totalReturn: (twr - 1) * 100,
+                sharpe: vol > 0 ? (cagr - rf) / vol : 0,
+                yearly, worstYear: Math.min(...yv), bestYear: Math.max(...yv),
+            };
+        }
+
+        // Each sleeve follows its real series where it has data for the week, otherwise it grows at its
+        // assumed annual rate. DCA goes in and the portfolio rebalances to target in the first week of each month.
+        function runHistorical({ weights, assumptions, keys, initial, monthly, startYear, endYear }) {
+            const { dates } = HIST;
+            const values = HIST.series.TDEX;
+            const real = ASSETS.map(() => 0);
+            const idx = [];
+            dates.forEach((d, i) => { const y = +d.slice(0, 4); if (y >= startYear && y <= endYear) idx.push(i); });
+            if (idx.length < 53) return null;
+            const fixed = assumptions.map(a => Math.pow(1 + a.mu / 100, 1 / 52) - 1);
+            let hold = weights.map(w => w * initial), bench = initial, invested = initial;
+            let prevMonth = dates[idx[0]].slice(0, 7);
+            const out = { dates: [dates[idx[0]]], port: [initial], bench: [initial], invested: [initial], weeklyPort: [], weeklyBench: [] };
+            for (let k = 1; k < idx.length; k++) {
+                const i = idx[k];
+                const thaiR = values[i] / values[i - 1] - 1;
+                const before = hold.reduce((s, h) => s + h, 0);
+                hold = hold.map((h, j) => {
+                    const s = keys[j] && HIST.series[keys[j]];
+                    if (s && s[i] != null && s[i - 1] != null) { real[j]++; return h * (s[i] / s[i - 1]); }
+                    return h * (1 + fixed[j]);
+                });
+                const after = hold.reduce((s, h) => s + h, 0);
+                out.weeklyPort.push(before > 0 ? after / before - 1 : 0);
+                out.weeklyBench.push(thaiR);
+                bench *= 1 + thaiR;
+                const month = dates[i].slice(0, 7);
+                if (month !== prevMonth) {
+                    const total = after + monthly;
+                    hold = weights.map(w => w * total);
+                    bench += monthly;
+                    invested += monthly;
+                    prevMonth = month;
+                }
+                out.dates.push(dates[i]);
+                out.port.push(hold.reduce((s, h) => s + h, 0));
+                out.bench.push(bench);
+                out.invested.push(invested);
+            }
+            const rf = assumptions[ASSETS.findIndex(a => a.key === 'cashGold')].mu;
+            out.statsPort = seriesStats(out.weeklyPort, out.dates, rf);
+            out.statsBench = seriesStats(out.weeklyBench, out.dates, rf);
+            out.keys = keys;
+            out.coverage = real.map(c => c / (idx.length - 1));
+            out.realShare = weights.reduce((sum, w, j) => sum + w * out.coverage[j], 0);
+            return out;
+        }
+
+        function HistChart({ result }) {
+            const [hoverRaw, setHover] = useState(null);
+            const W = 800, H = 320, m = { l: 64, r: 96, t: 16, b: 36 };
+            const iw = W - m.l - m.r, ih = H - m.t - m.b;
+            const { dates, port, bench, invested } = result;
+            const n = dates.length - 1;
+            const hover = hoverRaw !== null && hoverRaw <= n ? hoverRaw : null; // range may have shrunk since the last hover
+            const yMax = Math.max(...port, ...bench, ...invested) * 1.05;
+            const x = i => m.l + (i / n) * iw;
+            const y = v => m.t + ih - (v / yMax) * ih;
+            const path = vals => vals.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
+            const yTicks = Array.from({ length: 5 }, (_, i) => (yMax / 4) * i);
+            const yearStarts = dates.map((d, i) => [d.slice(0, 4), i]).filter(([yr], i) => i === 0 || yr !== dates[i - 1].slice(0, 4));
+            const every = Math.ceil(yearStarts.length / 8);
+            const fmtAxis = v => v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : `${Math.round(v / 1e3)}K`;
+            // Keep the two end labels from overlapping
+            let yPort = y(port[n]), yBench = y(bench[n]);
+            if (Math.abs(yPort - yBench) < 14) { const mid = (yPort + yBench) / 2, s = yPort <= yBench ? -7 : 7; yPort = mid + s; yBench = mid - s; }
+
+            const onMove = (e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const px = ((e.clientX - rect.left) / rect.width) * W;
+                const i = Math.round(((px - m.l) / iw) * n);
+                setHover(i >= 0 && i <= n ? i : null);
+            };
+
+            return (
+                <div className="relative">
+                    <div className="flex flex-wrap gap-4 text-xs text-slate-300 mb-2">
+                        <span className="flex items-center gap-2"><span className="inline-block w-4 h-0.5" style={{ background: PORT_COLOR }}></span>พอร์ตของคุณ</span>
+                        <span className="flex items-center gap-2"><span className="inline-block w-4 h-0.5" style={{ background: BENCH_COLOR }}></span>TDEX 100% (เงินลงทุนเท่ากัน)</span>
+                        <span className="flex items-center gap-2"><span className="inline-block w-4 border-t border-dashed border-slate-400"></span>เงินลงทุนรวม</span>
+                    </div>
+                    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="กราฟมูลค่าพอร์ตเทียบกับ TDEX จากข้อมูลจริงรายสัปดาห์">
+                        {yTicks.map(v => (
+                            <g key={v}>
+                                <line x1={m.l} x2={W - m.r} y1={y(v)} y2={y(v)} stroke="#334155" strokeWidth="1" />
+                                <text x={m.l - 8} y={y(v) + 4} textAnchor="end" fontSize="11" fill="#94a3b8">{fmtAxis(v)}</text>
+                            </g>
+                        ))}
+                        {yearStarts.filter((_, k) => k % every === 0).map(([yr, i]) => (
+                            <text key={yr} x={x(i)} y={H - m.b + 18} textAnchor="middle" fontSize="11" fill="#94a3b8">{yr}</text>
+                        ))}
+                        <path d={path(invested)} fill="none" stroke="#94a3b8" strokeWidth="1" strokeDasharray="4 4" />
+                        <path d={path(bench)} fill="none" stroke={BENCH_COLOR} strokeWidth="2" strokeLinejoin="round" />
+                        <path d={path(port)} fill="none" stroke={PORT_COLOR} strokeWidth="2" strokeLinejoin="round" />
+                        <text x={W - m.r + 6} y={yPort + 4} fontSize="11" fill="#f1f5f9" fontWeight="600">พอร์ต</text>
+                        <text x={W - m.r + 6} y={yBench + 4} fontSize="11" fill="#cbd5e1">TDEX</text>
+                        {hover !== null && (
+                            <g>
+                                <line x1={x(hover)} x2={x(hover)} y1={m.t} y2={m.t + ih} stroke="#cbd5e1" strokeWidth="1" />
+                                <circle cx={x(hover)} cy={y(bench[hover])} r="4" fill={BENCH_COLOR} stroke="#1e293b" strokeWidth="2" />
+                                <circle cx={x(hover)} cy={y(port[hover])} r="4" fill={PORT_COLOR} stroke="#1e293b" strokeWidth="2" />
+                            </g>
+                        )}
+                        <rect x={m.l} y={m.t} width={iw} height={ih} fill="transparent" onMouseMove={onMove} onMouseLeave={() => setHover(null)} />
+                    </svg>
+                    {hover !== null && (
+                        <div className="absolute top-8 pointer-events-none bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-xs shadow-xl"
+                             style={{ left: `${(x(hover) / W) * 100}%`, transform: hover > n / 2 ? 'translateX(calc(-100% - 12px))' : 'translateX(12px)' }}>
+                            <div className="text-slate-400 mb-1">สัปดาห์ {dates[hover]}</div>
+                            <div className="text-slate-300">พอร์ต: <span className="font-semibold text-white">{fmtThb(port[hover])}</span></div>
+                            <div className="text-slate-300">TDEX: <span className="font-semibold text-white">{fmtThb(bench[hover])}</span></div>
+                            <div className="text-slate-300">ลงทุนรวม: <span className="font-semibold text-white">{fmtThb(invested[hover])}</span></div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function HistResults({ result, startYear, endYear }) {
+            if (!HIST) {
+                return <div className="text-rose-400 text-sm">ไม่พบไฟล์ข้อมูล sandbox-data.js (สร้างได้ด้วยคำสั่ง <code>python analytics.py</code>) ต้องวางไว้โฟลเดอร์เดียวกับหน้านี้</div>;
+            }
+            if (!result) {
+                return <div className="text-rose-400 text-sm">ช่วงเวลาสั้นเกินไปหรือไม่มีสัดส่วนพอร์ต กรุณาเลือกอย่างน้อย 1 ปีเต็มและกำหนดสัดส่วนในแท็บ 1</div>;
+            }
+            const p = result.statsPort, b = result.statsBench, n = result.dates.length - 1;
+            const realShare = result.realShare * 100;
+            const used = result.keys.map((k, j) => k && result.coverage[j] > 0 ? `${ASSETS[j].label} = ${k.replace('_THB', ' (บาท)')}${result.coverage[j] < 0.995 ? ` ${(result.coverage[j] * 100).toFixed(0)}% ของช่วง` : ''}` : null).filter(Boolean);
+            const rows = [
+                ['มูลค่าปลายทาง', fmtThb(result.port[n]), fmtThb(result.bench[n])],
+                ['CAGR (time-weighted)', fmtPct(p.cagr), fmtPct(b.cagr)],
+                ['ผลตอบแทนสะสม (time-weighted)', fmtPct(p.totalReturn), fmtPct(b.totalReturn)],
+                ['ความผันผวนต่อปี', `${p.vol.toFixed(1)}%`, `${b.vol.toFixed(1)}%`],
+                ['Max Drawdown', `${p.maxDd.toFixed(1)}%`, `${b.maxDd.toFixed(1)}%`],
+                ['Sharpe Ratio', p.sharpe.toFixed(2), b.sharpe.toFixed(2)],
+                ['ปีที่ดีที่สุด', fmtPct(p.bestYear), fmtPct(b.bestYear)],
+                ['ปีที่แย่ที่สุด', fmtPct(p.worstYear), fmtPct(b.worstYear)],
+            ];
+            return (
+                <>
+                    <div>
+                        <h3 className="text-lg font-semibold text-white">📈 Backtest ด้วยข้อมูลจริง ({result.dates[0]} ถึง {result.dates[n]}, {n} สัปดาห์)</h3>
+                        <p className="text-xs text-slate-400 mt-1">ใช้ผลตอบแทนรวมปันผลรายสัปดาห์จริง: {used.join(', ')} เทียบกับการลงทุนใน TDEX 100% ด้วยเงินก้อนแรกและ DCA เท่ากัน</p>
+                    </div>
+
+                    <HistChart result={result} />
+
+                    {realShare < 99.5 && (
+                        <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl p-3 text-xs text-amber-200">
+                            ⚠️ ข้อมูลจริงครอบคลุม {realShare.toFixed(0)}% ของพอร์ต (ถ่วงตามน้ำหนักและจำนวนสัปดาห์) อีก {(100 - realShare).toFixed(0)}% เติบโตคงที่ตามสมมติฐานโดยไม่มีความผันผวน
+                            {realShare < 85 ? ' ความผันผวน, Max Drawdown และ Sharpe ของพอร์ตจึงดูดีเกินจริง ไม่ควรตีความเป็นความเสี่ยงจริงของทั้งพอร์ต' : ' ส่วนใหญ่คือเงินสด ซึ่งผันผวนน้อยอยู่แล้ว ตัวชี้วัดความเสี่ยงจึงใกล้เคียงความจริง'}
+                        </div>
+                    )}
+
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="text-slate-400 text-xs border-b border-slate-700">
+                                    <th className="text-left py-2 font-medium">ตัวชี้วัด</th>
+                                    <th className="text-right py-2 font-medium"><span className="inline-block w-3 h-0.5 align-middle mr-1" style={{ background: PORT_COLOR }}></span>พอร์ตของคุณ</th>
+                                    <th className="text-right py-2 font-medium"><span className="inline-block w-3 h-0.5 align-middle mr-1" style={{ background: BENCH_COLOR }}></span>TDEX 100%</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {rows.map(([label, a, c]) => (
+                                    <tr key={label} className="border-b border-slate-700/50">
+                                        <td className="py-2 text-slate-300">{label}</td>
+                                        <td className="py-2 text-right font-semibold text-white">{a}</td>
+                                        <td className="py-2 text-right text-slate-300">{c}</td>
+                                    </tr>
+                                ))}
+                                <tr>
+                                    <td className="py-2 text-slate-400 text-xs">เงินลงทุนรวม</td>
+                                    <td colSpan="2" className="py-2 text-right text-slate-400 text-xs">{fmtThb(result.invested[n])}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <details className="bg-slate-900/60 border border-slate-700 rounded-xl p-4">
+                        <summary className="cursor-pointer text-sm text-slate-300">ดูผลตอบแทนรายปีปฏิทิน</summary>
+                        <div className="overflow-x-auto mt-3">
+                            <table className="w-full text-xs">
+                                <thead>
+                                    <tr className="text-slate-400 border-b border-slate-700">
+                                        <th className="text-left py-1 font-medium">ปี</th>
+                                        <th className="text-right py-1 font-medium">พอร์ตของคุณ</th>
+                                        <th className="text-right py-1 font-medium">TDEX 100%</th>
+                                        <th className="text-right py-1 font-medium">ส่วนต่าง</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {Object.keys(p.yearly).map(yr => {
+                                        const diff = p.yearly[yr] - b.yearly[yr];
+                                        return (
+                                            <tr key={yr} className="border-b border-slate-700/50 text-slate-300">
+                                                <td className="py-1">{yr}{(yr === result.dates[0].slice(0, 4) || yr === result.dates[n].slice(0, 4)) ? ' *' : ''}</td>
+                                                <td className="py-1 text-right">{fmtPct(p.yearly[yr])}</td>
+                                                <td className="py-1 text-right">{fmtPct(b.yearly[yr])}</td>
+                                                <td className="py-1 text-right">{fmtPct(diff)}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                            <p className="text-xs text-slate-500 mt-2">* ปีแรกและปีสุดท้ายอาจไม่ครบปี</p>
+                        </div>
+                    </details>
+
+                    <p className="text-xs text-slate-500">
+                        ข้อมูลถึงสัปดาห์ {HIST.asOf} จาก Yahoo Finance ผ่าน download.py และ analytics.py (ราคา ETF รวมปันผลและหักค่าธรรมเนียมกองทุนแล้ว)
+                        ตัวแทนแต่ละฝั่ง: TDEX (SET50) แทน Thai Dividend & REITs/IFFs จึงไม่สะท้อนหุ้นปันผลหรือกองทุนโครงสร้างพื้นฐานโดยตรง, ABFTH (พันธบัตรรัฐบาลไทย) แทน Core พันธบัตร/RMF ซึ่งซื้อขายน้อยมาก ราคาเป็นราคาซื้อขายล่าสุดที่บางสัปดาห์ค้างนิ่งแล้วกระโดด ความผันผวนจึงสูงกว่ามูลค่าหน่วยลงทุน (NAV) จริงอยู่บ้าง, QQQ หรือ SPY แทน US Tech / Global
+                        ซึ่งเมื่อแปลงเป็นบาทจะรวมผลของค่าเงิน USD/THB ด้วย ส่วนเงินสด และสินทรัพย์ที่ยังไม่มีข้อมูลในช่วงที่เลือก เติบโตคงที่ตามผลตอบแทนที่สมมติไว้ทุกสัปดาห์
+                        Sharpe ใช้ผลตอบแทนเงินสดที่สมมติเป็นอัตราปลอดความเสี่ยง ไม่รวมภาษีและค่าซื้อขาย ผลในอดีตไม่ได้รับประกันผลในอนาคตและไม่ใช่คำแนะนำการลงทุน
+                    </p>
+                </>
+            );
+        }
+
+        function FanChart({ bands, invested, years }) {
+            const [hover, setHover] = useState(null);
+            const W = 800, H = 320, m = { l: 64, r: 72, t: 16, b: 36 };
+            const iw = W - m.l - m.r, ih = H - m.t - m.b;
+            const n = bands.length - 1;
+            const yMax = Math.max(...bands.map(b => b.p95), invested) * 1.05;
+            const x = i => m.l + (i / n) * iw;
+            const y = v => m.t + ih - (v / yMax) * ih;
+            const line = key => bands.map((b, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(b[key]).toFixed(1)}`).join('');
+            const area = bands.map((b, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(b.p95).toFixed(1)}`).join('')
+                + bands.slice().reverse().map((b, j) => `L${x(n - j).toFixed(1)},${y(b.p5).toFixed(1)}`).join('') + 'Z';
+            const yTicks = Array.from({ length: 5 }, (_, i) => (yMax / 4) * i);
+            const step = years <= 10 ? 1 : years <= 20 ? 2 : 5;
+            const xTicks = Array.from({ length: Math.floor(years / step) + 1 }, (_, i) => i * step);
+            const fmtAxis = v => v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : `${Math.round(v / 1e3)}K`;
+            const last = bands[n];
+
+            const onMove = (e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const px = ((e.clientX - rect.left) / rect.width) * W;
+                const i = Math.round(((px - m.l) / iw) * n);
+                setHover(i >= 0 && i <= n ? i : null);
+            };
+            const hb = hover !== null ? bands[hover] : null;
+
+            return (
+                <div className="relative">
+                    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="กราฟพัดแสดงช่วงมูลค่าพอร์ตจำลอง P5 ถึง P95 และค่ามัธยฐาน">
+                        {yTicks.map(v => (
+                            <g key={v}>
+                                <line x1={m.l} x2={W - m.r} y1={y(v)} y2={y(v)} stroke="#334155" strokeWidth="1" />
+                                <text x={m.l - 8} y={y(v) + 4} textAnchor="end" fontSize="11" fill="#94a3b8">{fmtAxis(v)}</text>
+                            </g>
+                        ))}
+                        {xTicks.map(t => (
+                            <text key={t} x={x(t * 12)} y={H - m.b + 18} textAnchor="middle" fontSize="11" fill="#94a3b8">{t === 0 ? 'เริ่ม' : `ปี ${t}`}</text>
+                        ))}
+                        <path d={area} fill="#818cf8" fillOpacity="0.18" />
+                        <line x1={m.l} x2={W - m.r} y1={y(invested)} y2={y(invested)} stroke="#94a3b8" strokeWidth="1" strokeDasharray="4 4" />
+                        <path d={line('p95')} fill="none" stroke="#818cf8" strokeOpacity="0.5" strokeWidth="1" />
+                        <path d={line('p5')} fill="none" stroke="#818cf8" strokeOpacity="0.5" strokeWidth="1" />
+                        <path d={line('p50')} fill="none" stroke="#818cf8" strokeWidth="2" strokeLinejoin="round" />
+                        <text x={W - m.r + 6} y={y(last.p95) + 4} fontSize="11" fill="#cbd5e1">P95</text>
+                        <text x={W - m.r + 6} y={y(last.p50) + 4} fontSize="11" fill="#f1f5f9" fontWeight="600">มัธยฐาน</text>
+                        <text x={W - m.r + 6} y={y(last.p5) + 4} fontSize="11" fill="#cbd5e1">P5</text>
+                        <text x={m.l + 4} y={y(invested) - 6} fontSize="11" fill="#94a3b8">เงินลงทุนรวม</text>
+                        {hb && (
+                            <g>
+                                <line x1={x(hover)} x2={x(hover)} y1={m.t} y2={m.t + ih} stroke="#cbd5e1" strokeWidth="1" />
+                                <circle cx={x(hover)} cy={y(hb.p50)} r="4" fill="#818cf8" stroke="#1e293b" strokeWidth="2" />
+                            </g>
+                        )}
+                        <rect x={m.l} y={m.t} width={iw} height={ih} fill="transparent" onMouseMove={onMove} onMouseLeave={() => setHover(null)} />
+                    </svg>
+                    {hb && (
+                        <div className="absolute top-2 pointer-events-none bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-xs shadow-xl"
+                             style={{ left: `${(x(hover) / W) * 100}%`, transform: hover > n / 2 ? 'translateX(calc(-100% - 12px))' : 'translateX(12px)' }}>
+                            <div className="text-slate-400 mb-1">ปีที่ {Math.floor(hover / 12)} เดือนที่ {hover % 12}</div>
+                            <div className="text-slate-300">P95: <span className="font-semibold text-white">{fmtThb(hb.p95)}</span></div>
+                            <div className="text-slate-300">มัธยฐาน: <span className="font-semibold text-white">{fmtThb(hb.p50)}</span></div>
+                            <div className="text-slate-300">P5: <span className="font-semibold text-white">{fmtThb(hb.p5)}</span></div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function App() {
+            // --- Active Tab ---
+            const [activeTab, setActiveTab] = useState('stress');
+
+            // --- 1. Portfolio Asset Allocation State ---
+            const [portfolio, setPortfolio] = useState({
+                coreBondsRMF: 50,    // 50% Core
+                usTechEquities: 20,  // 20% Satellite US Tech
+                thaiDividend: 15,    // 15% Thai Dividend & REITs/IFFs (DIF/TFFIF)
+                cashGold: 15         // 15% Cash & Short-Term
+            });
+
+            const totalWeight = portfolio.coreBondsRMF + portfolio.usTechEquities + portfolio.thaiDividend + portfolio.cashGold;
+
+            // --- 2. Stress Test Simulation State ---
+            const [scenario, setScenario] = useState('rate_shock'); // 'rate_shock', 'covid_crash', 'stagflation', 'bull_run'
+
+            // --- 3. Options Strategy Simulator State ---
+            const [optionType, setOptionType] = useState('csp'); // 'csp' (Cash-Secured Put), 'cc' (Covered Call)
+            const [stockPrice, setStockPrice] = useState(100);
+            const [strikePrice, setStrikePrice] = useState(95);
+            const [premiumReceived, setPremiumReceived] = useState(3.5);
+            const [targetTestPrice, setTargetTestPrice] = useState(88);
+
+            // --- 4. Monte Carlo Backtest State ---
+            const [initialCapital, setInitialCapital] = useState(1000000);
+            const [monthlyContribution, setMonthlyContribution] = useState(10000);
+            const [years, setYears] = useState(10);
+            const [numPaths, setNumPaths] = useState(500);
+            const [seed, setSeed] = useState(42);
+            const [assumptions, setAssumptions] = useState(ASSETS);
+
+            const backtest = useMemo(() => {
+                if (activeTab !== 'backtest' || totalWeight <= 0) return null;
+                // Normalize so the simulation always uses a fully invested portfolio
+                const weights = ASSETS.map(a => portfolio[a.key] / totalWeight);
+                return runMonteCarlo({ weights, assumptions, initial: initialCapital, monthly: monthlyContribution, years, paths: numPaths, seed });
+            }, [activeTab, portfolio, totalWeight, assumptions, initialCapital, monthlyContribution, years, numPaths, seed]);
+
+            // --- 5. Historical Backtest State (real TDEX data) ---
+            const [usProxy, setUsProxy] = useState(HIST && !HIST.series.QQQ && HIST.series.SPY ? 'SPY' : 'QQQ');
+            const [inBaht, setInBaht] = useState(true);
+            const histKeys = HIST ? sleeveKeys(usProxy, inBaht) : ASSETS.map(() => null);
+            const histFirstYear = HIST ? +HIST.dates[0].slice(0, 4) : 2010;
+            const histLastYear = HIST ? +HIST.dates[HIST.dates.length - 1].slice(0, 4) : 2010;
+            const [btMode, setBtMode] = useState(HIST ? 'hist' : 'mc'); // 'hist' (real data) or 'mc' (Monte Carlo)
+            const [startYear, setStartYear] = useState(histFirstYear);
+            const [endYear, setEndYear] = useState(histLastYear);
+            const histYears = Array.from({ length: histLastYear - histFirstYear + 1 }, (_, i) => histFirstYear + i);
+
+            const histResult = useMemo(() => {
+                if (activeTab !== 'backtest' || btMode !== 'hist' || !HIST || totalWeight <= 0) return null;
+                const weights = ASSETS.map(a => portfolio[a.key] / totalWeight);
+                return runHistorical({ weights, assumptions, keys: histKeys, initial: initialCapital, monthly: monthlyContribution, startYear, endYear });
+            }, [activeTab, btMode, portfolio, totalWeight, assumptions, initialCapital, monthlyContribution, startYear, endYear, usProxy, inBaht]);
+
+            // --- Stress Test Calculation ---
+            const scenarioResults = useMemo(() => {
+                let coreReturn = 0, techReturn = 0, thaiReturn = 0, cashReturn = 0;
+                let description = "";
+
+                if (scenario === 'rate_shock') {
+                    // Bond yield spike 3.5%
+                    coreReturn = -6.5;
+                    techReturn = -18.5;
+                    thaiReturn = -12.0;
+                    cashReturn = 1.5;
+                    description = "สถานการณ์ Bond Yield พุ่งแรงสู่ 3.5% (Rate Hike Shock): กระทบสินทรัพย์เติบโตและกองทุนโครงสร้างพื้นฐาน";
+                } else if (scenario === 'covid_crash') {
+                    // Sudden panic
+                    coreReturn = 3.0;
+                    techReturn = -30.0;
+                    thaiReturn = -25.0;
+                    cashReturn = 2.0;
+                    description = "สถานการณ์วิกฤตฉับพลัน (COVID-style Crash): หุ้นร่วงหนักทั่วโลก พันธบัตรและเงินสดทำหน้าที่หลุมหลบภัย";
+                } else if (scenario === 'stagflation') {
+                    // Inflation stays high
+                    coreReturn = -8.0;
+                    techReturn = -15.0;
+                    thaiReturn = -5.0;
+                    cashReturn = 1.0;
+                    description = "สถานการณ์ภาวะเงินเฟ้อสูงเศรษฐกิจชะลอตัว (Stagflation): พันธบัตรและหุ้นเติบโตเผชิญแรงกดดันพร้อมกัน";
+                } else if (scenario === 'bull_run') {
+                    // Fed cuts rates & economic growth
+                    coreReturn = 7.5;
+                    techReturn = 28.0;
+                    thaiReturn = 15.0;
+                    cashReturn = 1.5;
+                    description = "สถานการณ์ดอกเบี้ยขาลงและเศรษฐกิจฟื้นตัว (Fed Rate Cut Bull Run): สินทรัพย์เติบโตและหุ้นปันผลพุ่งเด่น";
+                }
+
+                // Per-asset contribution to portfolio return (percentage points)
+                const contributions = [
+                    { label: 'Core: พันธบัตร/RMF', weight: portfolio.coreBondsRMF, ret: coreReturn },
+                    { label: 'US Tech / Global', weight: portfolio.usTechEquities, ret: techReturn },
+                    { label: 'Thai Dividend & REITs/IFFs', weight: portfolio.thaiDividend, ret: thaiReturn },
+                    { label: 'Cash & Short-Term', weight: portfolio.cashGold, ret: cashReturn },
+                ].map(a => ({ ...a, contrib: a.weight * a.ret / 100 }));
+
+                const weightedReturn = contributions.reduce((sum, a) => sum + a.contrib, 0);
+
+                return { coreReturn, techReturn, thaiReturn, cashReturn, weightedReturn, contributions, description };
+            }, [scenario, portfolio]);
+
+            // --- Options PnL Calculation (per contract = 100 shares) ---
+            const optionsResult = useMemo(() => {
+                let pnl = 0;
+                let status = "";
+                let breakeven = 0, maxProfit = 0, maxLoss = 0, capital = 0;
+                if (optionType === 'csp') {
+                    // Cash-Secured Put: Sold Put at strikePrice, received premium. If price at expiry <= strike, assigned at strike.
+                    const assigned = targetTestPrice <= strikePrice;
+                    pnl = assigned ? (premiumReceived - (strikePrice - targetTestPrice)) * 100 : premiumReceived * 100;
+                    status = assigned ? `ถูกบังคับซื้อหุ้น (Assigned) ที่ราคา Strike ${strikePrice} USD` : `สัญญาหมดอายุไร้ค่า (Expired OTM) - รับเต็มพรีเมียม`;
+                    breakeven = strikePrice - premiumReceived;
+                    maxProfit = premiumReceived * 100;
+                    maxLoss = -(strikePrice - premiumReceived) * 100;
+                    capital = strikePrice * 100;
+                } else {
+                    // Covered Call: Bought stock at stockPrice, Sold Call at strikePrice, received premium.
+                    const calledAway = targetTestPrice >= strikePrice;
+                    const stockGain = calledAway ? (strikePrice - stockPrice) : (targetTestPrice - stockPrice);
+                    pnl = (stockGain + premiumReceived) * 100;
+                    status = calledAway ? `หุ้นถูกเรียกคืน (Called Away) ที่ราคา Strike ${strikePrice} USD` : `ถือครองหุ้นต่อ + ได้รับพรีเมียมค่าตั๋ว`;
+                    breakeven = stockPrice - premiumReceived;
+                    maxProfit = (strikePrice - stockPrice + premiumReceived) * 100;
+                    maxLoss = -(stockPrice - premiumReceived) * 100;
+                    capital = stockPrice * 100;
+                }
+                const returnOnCapital = capital > 0 ? (pnl / capital) * 100 : 0;
+                return { pnl, status, breakeven, maxProfit, maxLoss, capital, returnOnCapital };
+            }, [optionType, stockPrice, strikePrice, premiumReceived, targetTestPrice]);
+
+            const riskLabel = scenarioResults.weightedReturn <= -15
+                ? { text: 'High Risk (ขาดทุนหนัก)', cls: 'text-rose-400' }
+                : scenarioResults.weightedReturn <= -5
+                    ? { text: 'Moderate Risk', cls: 'text-amber-400' }
+                    : { text: 'Defensive / Resilient', cls: 'text-emerald-400' };
+
+            const sliders = [
+                { key: 'coreBondsRMF', label: 'Core: พันธบัตร/RMF (มั่นคง):' },
+                { key: 'usTechEquities', label: 'Satellite: US Tech / Global:' },
+                { key: 'thaiDividend', label: 'Satellite: Thai Dividend & REITs/IFFs:' },
+                { key: 'cashGold', label: 'Cash & Short-Term Buffer:' },
+            ];
+
+            const numberInputs = [
+                { label: 'ราคาหุ้นปัจจุบันอ้างอิง ($)', value: stockPrice, set: setStockPrice, step: '1' },
+                { label: 'ราคา Strike Price ($)', value: strikePrice, set: setStrikePrice, step: '1' },
+                { label: 'พรีเมียมที่ได้รับ ($/หุ้น)', value: premiumReceived, set: setPremiumReceived, step: '0.5' },
+                { label: 'ราคาจำลอง ณ วันหมดอายุ ($)', value: targetTestPrice, set: setTargetTestPrice, step: '1' },
+            ];
+
+            return (
+                <div className="max-w-7xl mx-auto p-4 md:p-6">
+                    {/* Header */}
+                    <header className="bg-slate-800 border border-slate-700 rounded-2xl p-6 mb-6 shadow-xl">
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                            <div>
+                                <span className="bg-indigo-500/20 text-indigo-400 text-xs px-3 py-1 rounded-full font-semibold uppercase tracking-wider">Quant Testing Sandbox v1.0</span>
+                                <h1 className="text-2xl md:text-3xl font-bold text-white mt-2">ระบบจำลองและทดสอบกลยุทธ์พอร์ตการลงทุน (Stress Test, Backtest & Options Lab)</h1>
+                                <p className="text-slate-400 text-sm mt-1">ทดสอบสัดส่วน Core-Satellite, จำลองวิกฤตเศรษฐกิจ, Backtest ด้วยข้อมูลจริง (TDEX, ABFTH, QQQ/SPY) และจำลองสถานการณ์ตลาด (Monte Carlo) และคำนวณผลตอบแทน Options Strategies</p>
+                            </div>
+                            <div className="bg-slate-900 border border-slate-700 px-4 py-3 rounded-xl text-right">
+                                <div className="text-xs text-slate-400">สัดส่วนพอร์ตสินทรัพย์รวม</div>
+                                <div className={`text-xl font-bold ${totalWeight === 100 ? 'text-emerald-400' : 'text-rose-400'}`}>{totalWeight}% {totalWeight !== 100 && '(ต้องเท่ากับ 100%)'}</div>
+                            </div>
+                        </div>
+
+                        {/* Navigation Tabs */}
+                        <div className="flex flex-wrap gap-2 mt-6 border-t border-slate-700 pt-4">
+                            <button onClick={() => setActiveTab('stress')} className={`px-4 py-2 rounded-xl text-sm font-medium transition ${activeTab === 'stress' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' : 'bg-slate-700/50 text-slate-300 hover:bg-slate-700'}`}>
+                                🧪 1. Portfolio Stress Test Lab
+                            </button>
+                            <button onClick={() => setActiveTab('options')} className={`px-4 py-2 rounded-xl text-sm font-medium transition ${activeTab === 'options' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' : 'bg-slate-700/50 text-slate-300 hover:bg-slate-700'}`}>
+                                📊 2. Options Strategy Simulator (CSP / CC)
+                            </button>
+                            <button onClick={() => setActiveTab('backtest')} className={`px-4 py-2 rounded-xl text-sm font-medium transition ${activeTab === 'backtest' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' : 'bg-slate-700/50 text-slate-300 hover:bg-slate-700'}`}>
+                                🎲 3. Backtest (ข้อมูลจริง / Monte Carlo)
+                            </button>
+                        </div>
+                    </header>
+
+                    {/* TAB 1: PORTFOLIO STRESS TEST LAB */}
+                    {activeTab === 'stress' && (
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* Left: Asset Allocator */}
+                            <div className="bg-slate-800 border border-slate-700 rounded-2xl p-6 shadow-xl space-y-4">
+                                <h3 className="text-lg font-semibold text-white mb-2">⚙️ กำหนดสัดส่วนพอร์ต (Core-Satellite)</h3>
+
+                                {sliders.map(s => (
+                                    <div key={s.key}>
+                                        <div className="flex justify-between text-sm mb-1">
+                                            <span className="text-slate-300">{s.label}</span>
+                                            <span className="font-bold text-indigo-400">{portfolio[s.key]}%</span>
+                                        </div>
+                                        <input type="range" min="0" max="100" value={portfolio[s.key]} onChange={(e) => setPortfolio({...portfolio, [s.key]: Number(e.target.value)})} className="w-full accent-indigo-500" />
+                                    </div>
+                                ))}
+
+                                <button onClick={() => setPortfolio({ coreBondsRMF: 50, usTechEquities: 20, thaiDividend: 15, cashGold: 15 })} className="w-full mt-2 px-3 py-2 rounded-xl text-xs font-medium bg-slate-700/50 text-slate-300 hover:bg-slate-700 transition">
+                                    ↺ รีเซ็ตเป็นสัดส่วนตั้งต้น (50/20/15/15)
+                                </button>
+                            </div>
+
+                            {/* Right: Stress Test Engine */}
+                            <div className="lg:col-span-2 bg-slate-800 border border-slate-700 rounded-2xl p-6 shadow-xl flex flex-col justify-between space-y-6">
+                                <div>
+                                    <h3 className="text-lg font-semibold text-white mb-3">🌪️ เลือกสถานการณ์ทดสอบวิกฤต (Select Stress Scenario)</h3>
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+                                        <button onClick={() => setScenario('rate_shock')} className={`p-3 rounded-xl text-xs font-medium border transition text-center ${scenario === 'rate_shock' ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-300'}`}>
+                                            📈 Rate Shock (Yield 3.5%)
+                                        </button>
+                                        <button onClick={() => setScenario('covid_crash')} className={`p-3 rounded-xl text-xs font-medium border transition text-center ${scenario === 'covid_crash' ? 'bg-rose-600 border-rose-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-300'}`}>
+                                            💥 COVID Panic Crash
+                                        </button>
+                                        <button onClick={() => setScenario('stagflation')} className={`p-3 rounded-xl text-xs font-medium border transition text-center ${scenario === 'stagflation' ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-300'}`}>
+                                            📉 Stagflation
+                                        </button>
+                                        <button onClick={() => setScenario('bull_run')} className={`p-3 rounded-xl text-xs font-medium border transition text-center ${scenario === 'bull_run' ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-300'}`}>
+                                            🚀 Bull Market Run
+                                        </button>
+                                    </div>
+
+                                    <div className="bg-slate-900/80 p-4 rounded-xl border border-slate-700 text-sm text-slate-300 mb-6">
+                                        {scenarioResults.description}
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                        <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                            <div className="text-xs text-slate-400">ผลตอบแทนพอร์ตจำลองรวม (Weighted Return)</div>
+                                            <div className={`text-2xl font-bold mt-1 ${scenarioResults.weightedReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(scenarioResults.weightedReturn)}</div>
+                                            {totalWeight !== 100 && <div className="text-xs text-rose-400 mt-1">⚠️ สัดส่วนรวม {totalWeight}% ผลลัพธ์ยังไม่สะท้อนพอร์ตเต็ม</div>}
+                                        </div>
+                                        <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                            <div className="text-xs text-slate-400">ระดับความเสี่ยงพอร์ต</div>
+                                            <div className={`text-lg font-bold mt-1 ${riskLabel.cls}`}>{riskLabel.text}</div>
+                                        </div>
+                                        <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                            <div className="text-xs text-slate-400">สถานะเงินสดสำรอง (Buffer)</div>
+                                            <div className="text-lg font-bold text-indigo-400 mt-1">{portfolio.cashGold}% Buffer</div>
+                                        </div>
+                                    </div>
+
+                                    {/* Contribution breakdown */}
+                                    <div className="mt-6 overflow-x-auto">
+                                        <table className="w-full text-sm">
+                                            <thead>
+                                                <tr className="text-slate-400 text-xs border-b border-slate-700">
+                                                    <th className="text-left py-2 font-medium">สินทรัพย์</th>
+                                                    <th className="text-right py-2 font-medium">น้ำหนัก</th>
+                                                    <th className="text-right py-2 font-medium">ผลตอบแทนสมมติ</th>
+                                                    <th className="text-right py-2 font-medium">ผลกระทบต่อพอร์ต</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {scenarioResults.contributions.map(a => (
+                                                    <tr key={a.label} className="border-b border-slate-700/50">
+                                                        <td className="py-2 text-slate-300">{a.label}</td>
+                                                        <td className="py-2 text-right text-slate-300">{a.weight}%</td>
+                                                        <td className={`py-2 text-right ${a.ret >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(a.ret)}</td>
+                                                        <td className={`py-2 text-right font-semibold ${a.contrib >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(a.contrib)}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                                <p className="text-xs text-slate-500">ผลตอบแทนแต่ละสถานการณ์เป็นค่าสมมติเพื่อการศึกษา ไม่ใช่การพยากรณ์และไม่ใช่คำแนะนำการลงทุน</p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* TAB 2: OPTIONS STRATEGY SIMULATOR */}
+                    {activeTab === 'options' && (
+                        <div className="bg-slate-800 border border-slate-700 rounded-2xl p-6 shadow-xl space-y-6">
+                            <h3 className="text-lg font-semibold text-white">📊 เครื่องมือจำลองกำไร/ขาดทุน Options (Cash-Secured Puts / Covered Calls)</h3>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                    <label className="text-xs text-slate-400 block mb-1">กลยุทธ์ Options</label>
+                                    <select value={optionType} onChange={(e) => setOptionType(e.target.value)} className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 text-white font-bold">
+                                        <option value="csp">Cash-Secured Put (CSP)</option>
+                                        <option value="cc">Covered Call (CC)</option>
+                                    </select>
+                                </div>
+                                {numberInputs.map(f => (
+                                    <div key={f.label} className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                        <label className="text-xs text-slate-400 block mb-1">{f.label}</label>
+                                        <input type="number" step={f.step} value={f.value} onChange={(e) => f.set(Number(e.target.value))} className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 text-white font-bold" />
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="bg-slate-900/90 border border-slate-700 p-6 rounded-2xl flex flex-col md:flex-row justify-between items-center gap-4">
+                                <div>
+                                    <div className="text-xs text-slate-400">ผลลัพธ์สถานะสัญญา:</div>
+                                    <div className="text-lg font-bold text-white mt-1">{optionsResult.status}</div>
+                                </div>
+                                <div className="text-right">
+                                    <div className="text-xs text-slate-400">กำไร/ขาดทุนสุทธิ (Net PnL, 1 สัญญา = 100 หุ้น):</div>
+                                    <div className={`text-2xl font-bold ${optionsResult.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                        {fmtUsd(optionsResult.pnl)}
+                                    </div>
+                                    <div className="text-xs text-slate-400 mt-1">ผลตอบแทนต่อเงินทุน {fmtPct(optionsResult.returnOnCapital)}</div>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                    <div className="text-xs text-slate-400">จุดคุ้มทุน (Breakeven)</div>
+                                    <div className="text-lg font-bold text-white mt-1">{optionsResult.breakeven.toFixed(2)} USD</div>
+                                </div>
+                                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                    <div className="text-xs text-slate-400">กำไรสูงสุด (Max Profit)</div>
+                                    <div className="text-lg font-bold text-emerald-400 mt-1">{fmtUsd(optionsResult.maxProfit)}</div>
+                                </div>
+                                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                    <div className="text-xs text-slate-400">ขาดทุนสูงสุด (หุ้นเหลือ 0)</div>
+                                    <div className="text-lg font-bold text-rose-400 mt-1">{fmtUsd(optionsResult.maxLoss)}</div>
+                                </div>
+                                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                    <div className="text-xs text-slate-400">{optionType === 'csp' ? 'เงินสดที่ต้องกันไว้' : 'เงินลงทุนซื้อหุ้น'}</div>
+                                    <div className="text-lg font-bold text-indigo-400 mt-1">{optionsResult.capital.toFixed(2)} USD</div>
+                                </div>
+                            </div>
+
+                            <p className="text-xs text-slate-500">คำนวณ ณ วันหมดอายุ ไม่รวมค่าคอมมิชชั่น ภาษี และเงินปันผล เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน</p>
+                        </div>
+                    )}
+
+                    {/* TAB 3: BACKTEST (historical TDEX data or Monte Carlo) */}
+                    {activeTab === 'backtest' && (
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* Left: Inputs & assumptions */}
+                            <div className="bg-slate-800 border border-slate-700 rounded-2xl p-6 shadow-xl space-y-4">
+                                <h3 className="text-lg font-semibold text-white">🎲 ตั้งค่า Backtest</h3>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button onClick={() => setBtMode('hist')} className={`p-2 rounded-xl text-xs font-medium border transition ${btMode === 'hist' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-300'}`}>
+                                        📜 ข้อมูลจริง (ETF)
+                                    </button>
+                                    <button onClick={() => setBtMode('mc')} className={`p-2 rounded-xl text-xs font-medium border transition ${btMode === 'mc' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-300'}`}>
+                                        🎲 Monte Carlo
+                                    </button>
+                                </div>
+                                <p className="text-xs text-slate-400">ใช้สัดส่วนพอร์ตจากแท็บ 1 (ปรับให้รวมเป็น 100% อัตโนมัติ) และปรับสมดุลพอร์ตทุกเดือน</p>
+
+                                <div>
+                                    <label className="text-xs text-slate-400 block mb-1">เงินลงทุนเริ่มต้น (THB)</label>
+                                    <input type="number" step="100000" min="0" value={initialCapital} onChange={(e) => setInitialCapital(Math.max(0, Number(e.target.value)))} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white font-bold" />
+                                </div>
+                                <div>
+                                    <label className="text-xs text-slate-400 block mb-1">ลงทุนเพิ่มทุกเดือน (DCA, THB)</label>
+                                    <input type="number" step="1000" min="0" value={monthlyContribution} onChange={(e) => setMonthlyContribution(Math.max(0, Number(e.target.value)))} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white font-bold" />
+                                </div>
+                                {btMode === 'hist' && HIST && (
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="text-xs text-slate-400 block mb-1">ปีเริ่มต้น</label>
+                                            <select value={startYear} onChange={(e) => { const v = Number(e.target.value); setStartYear(v); if (v > endYear) setEndYear(v); }} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white font-bold">
+                                                {histYears.map(yr => <option key={yr} value={yr}>{yr}</option>)}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-slate-400 block mb-1">ปีสิ้นสุด</label>
+                                            <select value={endYear} onChange={(e) => { const v = Number(e.target.value); setEndYear(v); if (v < startYear) setStartYear(v); }} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white font-bold">
+                                                {histYears.map(yr => <option key={yr} value={yr}>{yr}</option>)}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-slate-400 block mb-1">ตัวแทนหุ้นสหรัฐฯ</label>
+                                            <select value={usProxy} onChange={(e) => setUsProxy(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white font-bold">
+                                                <option value="QQQ" disabled={!HIST.series.QQQ}>QQQ (Nasdaq-100){HIST.series.QQQ ? '' : ' - ยังไม่มีข้อมูล'}</option>
+                                                <option value="SPY" disabled={!HIST.series.SPY}>SPY (S&amp;P 500){HIST.series.SPY ? '' : ' - ยังไม่มีข้อมูล'}</option>
+                                            </select>
+                                        </div>
+                                        <label className={`flex items-end gap-2 pb-2 text-xs ${HIST.series[`${usProxy}_THB`] ? 'text-slate-300' : 'text-slate-500'}`}>
+                                            <input type="checkbox" checked={inBaht && !!HIST.series[`${usProxy}_THB`]} disabled={!HIST.series[`${usProxy}_THB`]} onChange={(e) => setInBaht(e.target.checked)} className="accent-indigo-500" />
+                                            แปลงเป็นเงินบาท (รวมผลค่าเงิน USD/THB)
+                                        </label>
+                                    </div>
+                                )}
+                                {btMode === 'mc' && (<>
+                                <div>
+                                    <div className="flex justify-between text-sm mb-1">
+                                        <span className="text-slate-300">ระยะเวลาลงทุน:</span>
+                                        <span className="font-bold text-indigo-400">{years} ปี</span>
+                                    </div>
+                                    <input type="range" min="1" max="30" value={years} onChange={(e) => setYears(Number(e.target.value))} className="w-full accent-indigo-500" />
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="text-xs text-slate-400 block mb-1">จำนวนเส้นทางจำลอง</label>
+                                        <select value={numPaths} onChange={(e) => setNumPaths(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white font-bold">
+                                            <option value={200}>200</option>
+                                            <option value={500}>500</option>
+                                            <option value={1000}>1,000</option>
+                                            <option value={2000}>2,000</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-slate-400 block mb-1">Random Seed</label>
+                                        <div className="flex gap-1">
+                                            <input type="number" value={seed} onChange={(e) => setSeed(Number(e.target.value))} className="w-full min-w-0 bg-slate-900 border border-slate-600 rounded-lg p-2 text-white font-bold" />
+                                            <button onClick={() => setSeed(Math.floor(Math.random() * 100000))} title="สุ่มใหม่" className="px-2 rounded-lg bg-slate-700/50 hover:bg-slate-700 text-slate-300">🔀</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                </>)}
+
+                                <div>
+                                    <div className="text-sm text-slate-300 mb-2">สมมติฐานรายปีของแต่ละสินทรัพย์</div>
+                                    <table className="w-full text-xs">
+                                        <thead>
+                                            <tr className="text-slate-400 border-b border-slate-700">
+                                                <th className="text-left py-1 font-medium">สินทรัพย์</th>
+                                                <th className="text-right py-1 font-medium">น้ำหนัก</th>
+                                                <th className="text-right py-1 font-medium">ผลตอบแทน %</th>
+                                                <th className="text-right py-1 font-medium">ผันผวน %</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {assumptions.map((a, i) => (
+                                                <tr key={a.key} className="border-b border-slate-700/50">
+                                                    <td className="py-1 text-slate-300">{a.label}</td>
+                                                    <td className="py-1 text-right text-slate-300">{totalWeight > 0 ? ((portfolio[a.key] / totalWeight) * 100).toFixed(0) : 0}%</td>
+                                                    {btMode === 'hist' && histKeys[i] && seriesStart(histKeys[i]) <= `${startYear}-01-31` ? (
+                                                        <td colSpan="2" className="py-1 text-right text-amber-400 font-semibold">ข้อมูลจริง {histKeys[i].replace('_THB', ' (บาท)')}</td>
+                                                    ) : ['mu', 'vol'].map(f => btMode === 'hist' && f === 'vol' ? (
+                                                        histKeys[i]
+                                                            ? <td key={f} className="py-1 text-right text-amber-400" title="ก่อนวันนี้ใช้ผลตอบแทนที่สมมติ">จริงตั้งแต่ {seriesStart(histKeys[i]).slice(0, 7)}</td>
+                                                            : <td key={f} className="py-1 text-right text-slate-500" title="โหมดข้อมูลจริง: สินทรัพย์นี้เติบโตคงที่ ไม่มีความผันผวน">—</td>
+                                                    ) : (
+                                                        <td key={f} className="py-1 text-right">
+                                                            <input type="number" step="0.5" min={f === 'vol' ? 0 : -50} value={a[f]}
+                                                                onChange={(e) => setAssumptions(assumptions.map((b, j) => j === i ? { ...b, [f]: f === 'vol' ? Math.max(0, Number(e.target.value)) : Number(e.target.value) } : b))}
+                                                                className="w-14 bg-slate-900 border border-slate-600 rounded p-1 text-right text-white" />
+                                                        </td>
+                                                    ))}
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                    <button onClick={() => setAssumptions(ASSETS)} className="w-full mt-3 px-3 py-2 rounded-xl text-xs font-medium bg-slate-700/50 text-slate-300 hover:bg-slate-700 transition">
+                                        ↺ รีเซ็ตสมมติฐาน
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Right: Results */}
+                            <div className="lg:col-span-2 bg-slate-800 border border-slate-700 rounded-2xl p-6 shadow-xl space-y-6">
+                                {btMode === 'hist' ? (
+                                    <HistResults result={histResult} startYear={startYear} endYear={endYear} />
+                                ) : !backtest ? (
+                                    <div className="text-rose-400">กรุณากำหนดสัดส่วนพอร์ตในแท็บ 1 อย่างน้อยหนึ่งสินทรัพย์</div>
+                                ) : (
+                                    <>
+                                        <div>
+                                            <h3 className="text-lg font-semibold text-white">📈 ช่วงมูลค่าพอร์ตที่เป็นไปได้ ({numPaths.toLocaleString('en-US')} เส้นทาง, {years} ปี)</h3>
+                                            <p className="text-xs text-slate-400 mt-1">แถบสีคือช่วง P5–P95 (90% ของเส้นทางจำลองอยู่ในช่วงนี้) เส้นทึบคือค่ามัธยฐาน เส้นประคือเงินลงทุนรวม</p>
+                                        </div>
+
+                                        <FanChart bands={backtest.bands} invested={backtest.invested} years={years} />
+
+                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                            <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                                <div className="text-xs text-slate-400">มูลค่าพอร์ตปลายทาง (มัธยฐาน)</div>
+                                                <div className="text-xl font-bold text-white mt-1">{fmtThb(backtest.p50)}</div>
+                                                <div className="text-xs text-slate-400 mt-1">เงินลงทุนรวม {fmtThb(backtest.invested)}</div>
+                                            </div>
+                                            <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                                <div className="text-xs text-slate-400">กรณีแย่ (P5) / กรณีดี (P95)</div>
+                                                <div className="text-sm font-bold text-white mt-1">{fmtThb(backtest.p5)}</div>
+                                                <div className="text-sm font-bold text-white">{fmtThb(backtest.p95)}</div>
+                                            </div>
+                                            <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                                <div className="text-xs text-slate-400">ผลตอบแทนทบต้นต่อปี (CAGR มัธยฐาน)</div>
+                                                <div className={`text-xl font-bold mt-1 ${backtest.medianCagr >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{fmtPct(backtest.medianCagr)}</div>
+                                                <div className="text-xs text-slate-400 mt-1">วัดแบบ time-weighted ไม่รวมผลของ DCA</div>
+                                            </div>
+                                            <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                                <div className="text-xs text-slate-400">Max Drawdown (มัธยฐาน)</div>
+                                                <div className="text-xl font-bold text-rose-400 mt-1">{backtest.medianDd.toFixed(1)}%</div>
+                                            </div>
+                                            <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                                <div className="text-xs text-slate-400">Max Drawdown กรณีแย่ (P5)</div>
+                                                <div className="text-xl font-bold text-rose-400 mt-1">{backtest.worstDd5.toFixed(1)}%</div>
+                                            </div>
+                                            <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                                                <div className="text-xs text-slate-400">โอกาสที่พอร์ตปลายทางต่ำกว่าเงินลงทุนรวม</div>
+                                                <div className="text-xl font-bold text-amber-400 mt-1">{backtest.probLoss.toFixed(1)}%</div>
+                                            </div>
+                                        </div>
+
+                                        <details className="bg-slate-900/60 border border-slate-700 rounded-xl p-4">
+                                            <summary className="cursor-pointer text-sm text-slate-300">ดูตารางมูลค่าพอร์ตรายปี</summary>
+                                            <div className="overflow-x-auto mt-3">
+                                                <table className="w-full text-xs">
+                                                    <thead>
+                                                        <tr className="text-slate-400 border-b border-slate-700">
+                                                            <th className="text-left py-1 font-medium">ปี</th>
+                                                            <th className="text-right py-1 font-medium">P5</th>
+                                                            <th className="text-right py-1 font-medium">มัธยฐาน</th>
+                                                            <th className="text-right py-1 font-medium">P95</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {backtest.bands.filter((_, i) => i % 12 === 0).map((b, yr) => (
+                                                            <tr key={yr} className="border-b border-slate-700/50 text-slate-300">
+                                                                <td className="py-1">{yr}</td>
+                                                                <td className="py-1 text-right">{fmtThb(b.p5)}</td>
+                                                                <td className="py-1 text-right">{fmtThb(b.p50)}</td>
+                                                                <td className="py-1 text-right">{fmtThb(b.p95)}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </details>
+
+                                        <p className="text-xs text-slate-500">จำลองแบบ Monte Carlo ด้วยผลตอบแทนรายเดือนแบบ lognormal ที่มีสหสัมพันธ์ระหว่างสินทรัพย์ (หุ้นสหรัฐฯ–หุ้นไทย 0.6, พันธบัตร–หุ้นสหรัฐฯ −0.1) สมมติฐานเป็นค่าสมมติ ไม่ใช่ข้อมูลในอดีตจริง ไม่รวมค่าธรรมเนียมและภาษี ผลลัพธ์ไม่ใช่การรับประกันและไม่ใช่คำแนะนำการลงทุน</p>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

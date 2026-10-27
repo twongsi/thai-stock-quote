@@ -1,9 +1,13 @@
 # VSCode
 .vscode
+recon/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+.env
 
 # Thai Fund Dashboard
 fund_dashboard/.env
 fund_dashboard/cache/
-__pycache__/
-*.pyc
 site/

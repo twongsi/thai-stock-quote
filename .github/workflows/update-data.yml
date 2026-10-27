@@ -1,0 +1,63 @@
+name: Update data
+
+on:
+  schedule:
+    # 18:40 Bangkok, Monday-Friday, after the SET close
+    - cron: '40 11 * * 1-5'
+  workflow_dispatch:
+  # Runs once when this workflow file changes, so a new branch gets fresh data
+  push:
+    paths:
+      - .github/workflows/update-data.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-data-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      # Branch tip rather than the triggering commit, so a queued run sees the
+      # data the previous run committed
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: SET100 constituents
+        continue-on-error: true
+        run: python get_tickers.py
+
+      - name: Weekly prices
+        run: python download.py
+
+      - name: Analyst consensus
+        continue-on-error: true
+        run: python consensus.py
+
+      - name: Consensus changes
+        continue-on-error: true
+        run: python consensus_history.py
+
+      - name: Reports
+        run: python analytics.py
+
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tickers.csv data reports docs/sandbox-data.js
+          if git diff --cached --quiet; then
+            echo 'no changes'
+          else
+            git commit -m "Update data $(date -u +%Y-%m-%d)"
+            git push || { git pull --rebase -X theirs && git push; }
+          fi
