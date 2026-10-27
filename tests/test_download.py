@@ -28,3 +28,22 @@ def test_to_weekly_aggregates_days_into_monday_weeks():
     w = to_weekly(daily)
     assert list(w.index.strftime('%Y-%m-%d')) == ['2024-01-08', '2024-01-15']
     assert list(w['Open']) == [0, 5] and list(w['Close']) == [4, 9] and list(w['Volume']) == [5, 5]
+
+
+def test_fetch_drops_weeks_without_a_close(monkeypatch):
+    import numpy as np
+    import download
+    idx = pd.date_range('2026-10-05', periods=4, freq='W-MON', name='Date', tz='Asia/Bangkok')
+    hist = pd.DataFrame({c: [10.0, 11.0, 12.0, np.nan] if c in ('Close', 'Adj Close') else 10.0
+                         for c in download.COLUMNS}, index=idx)
+
+    class FakeTicker:
+        def __init__(self, symbol):
+            pass
+
+        def history(self, **kw):
+            return hist
+
+    monkeypatch.setattr(download.yf, 'Ticker', FakeTicker)
+    out = download.fetch('PTT.BK', '2026-10-01')
+    assert list(out['Close']) == [10.0, 11.0, 12.0]

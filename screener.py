@@ -54,8 +54,6 @@ def pct_change(close, weeks):
 
 
 def compute_metrics(ticker, df):
-    # Drop weeks where Yahoo applied a split inconsistently
-    df = df[clean_prices(df['Close']).notna()]
     close = df['Close']
     last = close.iloc[-1]
     year = df.tail(52)
@@ -88,6 +86,10 @@ def load_metrics(data_dir=DATA_DIR):
         ticker = os.path.splitext(os.path.basename(path))[0]
         df = pd.read_csv(path, index_col='Date', parse_dates=True)
         df = df[df['Close'] > 0]
+        # Drop weeks where Yahoo applied a split inconsistently. clean_prices needs
+        # three weeks to judge a price, so a new listing is kept as it is
+        if len(df) >= 3:
+            df = df[clean_prices(df['Close']).notna()]
         if len(df) < 2:
             continue
         rows.append(compute_metrics(ticker, df))
