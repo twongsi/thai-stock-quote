@@ -1,0 +1,5 @@
+# MiroFish for stocks
+# Only 'anthropic' is required for the live Claude backend.
+# Everything else in the pipeline uses the Python standard library, so the
+# simulator runs offline (MICROFISH_MOCK=1) with no third-party packages.
+anthropic>=0.40

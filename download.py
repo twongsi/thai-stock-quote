@@ -58,6 +58,9 @@ def fetch(symbol, start):
         daily = ticker.history(start=start, interval='1d', auto_adjust=False, actions=False)
         if len(daily) > len(raw):
             raw = to_weekly(daily)
+    # Mid-week, Yahoo can return the current week without a close; merge() lets new
+    # rows win, so such a row would overwrite a good one
+    raw = raw.dropna(subset=['Close'])
     if raw.empty:
         return None
     raw = raw.reset_index()
