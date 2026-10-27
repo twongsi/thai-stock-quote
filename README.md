@@ -14,13 +14,30 @@ consensus_history.py -> history of the daily consensus snapshots and each stock'
 
 analytics.py -> risk/return metrics, multi-factor screener (momentum, volatility, dividend yield, consensus upside) and a 12-1 momentum backtest, written to reports/
 
+screener.py -> ad-hoc filters on the weekly quotes (returns, RSI, 10/40-week SMA, 52-week high/low, volatility, volume) and, with --consensus, the newest 9hoon snapshot (upside, analyst count, rating, P/E, P/BV, dividend yield)
+
+```bash
+python screener.py --min-rsi 50 --above-sma 40 --golden-cross --near-high 5
+python screener.py --consensus --min-upside 15 --min-analysts 5 --rating Buy --sort upside
+python screener.py --consensus --max-pe 15 --min-div 4 --sort div_yield --top 10 --csv value.csv
+# every SET and mai stock (data/market/), with market, company/fund, sector and traded-value filters
+python screener.py --universe all --market mai --kind company --min-value 5 --above-sma 40
+python screener.py --universe all --consensus --min-upside 20 --sector BANK --sector FIN
+```
+
+market_download.py -> weekly quotes since 2016 for every stock on SET and mai (about 930, from the set.or.th stock list) into data/market/prices/, fetched from Yahoo in batches; the list, with each stock's market, sector and kind (company or property fund/REIT), goes to data/market/symbols.csv
+
+test_sources.py -> check which data sources (Yahoo, 9hoon, Settrade, set.or.th) answer from your network, e.g. when a download starts failing
+
+market_coverage.py -> list every SET and mai stock from set.or.th and test which ones Yahoo and 9hoon cover, written to reports/market/ (run by .github/workflows/market-coverage.yml, results as a run artifact)
+
 rrg/ -> RRG Studio (relative rotation graph page for SET industry/sector baskets, world indices in USD, US ETFs and stocks, with CSV upload) and sector_rotation.py (sector index, RS-Ratio/RS-Momentum, scoring and backtest). See rrg/README.md and rrg/WORKFLOW.md (Thai)
 
 recon.py -> map how a web page delivers its data (tables, forms, JS endpoints, HAR captures) before writing a scraper
 
 ## Automation
 
-.github/workflows/update-data.yml runs all of the above on weekdays at 18:40 Bangkok time and commits the results. It can also be started by hand from the Actions tab. .github/workflows/ci.yml runs the tests on every push. .github/workflows/rrg-weekly.yml rebuilds the RRG Studio page and sector rotation report on Saturdays and can deploy rrg/docs to GitHub Pages.
+.github/workflows/update-data.yml runs the SET100 scripts on weekdays at 18:40 Bangkok time and commits the results. .github/workflows/market-data.yml then runs market_download.py and `consensus.py --all-symbols --out-dir data/market/consensus` for the whole market at 18:52. It can also be started by hand from the Actions tab. .github/workflows/ci.yml runs the tests on every push. .github/workflows/rrg-weekly.yml rebuilds the RRG Studio page and sector rotation report on Saturdays and can deploy rrg/docs to GitHub Pages.
 
 ## Setup
 
