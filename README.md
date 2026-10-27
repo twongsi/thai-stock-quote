@@ -31,11 +31,13 @@ test_sources.py -> check which data sources (Yahoo, 9hoon, Settrade, set.or.th) 
 
 market_coverage.py -> list every SET and mai stock from set.or.th and test which ones Yahoo and 9hoon cover, written to reports/market/ (run by .github/workflows/market-coverage.yml, results as a run artifact)
 
+rrg/ -> RRG Studio (relative rotation graph page for SET industry/sector baskets, world indices in USD, US ETFs and stocks, with CSV upload) and sector_rotation.py (sector index, RS-Ratio/RS-Momentum, scoring and backtest). See rrg/README.md and rrg/WORKFLOW.md (Thai)
+
 recon.py -> map how a web page delivers its data (tables, forms, JS endpoints, HAR captures) before writing a scraper
 
 ## Automation
 
-.github/workflows/update-data.yml runs the SET100 scripts on weekdays at 18:40 Bangkok time and commits the results. .github/workflows/market-data.yml then runs market_download.py and `consensus.py --all-symbols --out-dir data/market/consensus` for the whole market at 18:52. It can also be started by hand from the Actions tab. .github/workflows/ci.yml runs the tests on every push.
+.github/workflows/update-data.yml runs the SET100 scripts on weekdays at 18:40 Bangkok time and commits the results. .github/workflows/market-data.yml then runs market_download.py and `consensus.py --all-symbols --out-dir data/market/consensus` for the whole market at 18:52. It can also be started by hand from the Actions tab. .github/workflows/ci.yml runs the tests on every push. .github/workflows/rrg-weekly.yml rebuilds the RRG Studio page and sector rotation report on Saturdays and can deploy rrg/docs to GitHub Pages.
 
 ## Setup
 

@@ -1,0 +1,603 @@
+<title>RRG Studio</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@500;600&family=IBM+Plex+Sans+Thai:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a trading-desk worksheet. The rotation graph is the instrument; controls sit on one rail above it,
+   the leaderboard and the data guide read below. Quadrant hues are the only saturated color on the page. */
+:root{
+  --paper:#f3f4f6; --sheet:#ffffff; --ink:#18212f; --ink-2:#4a5566; --ink-3:#7b8596;
+  --rule:#dde1e7; --rule-2:#c6ccd6; --well:#eceef2; --accent:#1d3557; --accent-ink:#ffffff;
+  --lead:#1c8f63; --weak:#b7800f; --lag:#c8414b; --impr:#2c66cf;
+  --lead-bg:rgba(28,143,99,.07); --weak-bg:rgba(183,128,15,.07); --lag-bg:rgba(200,65,75,.07); --impr-bg:rgba(44,102,207,.07);
+  --pos:#1c8f63; --neg:#c8414b;
+  --display:"Bai Jamjuree","IBM Plex Sans Thai",system-ui,sans-serif;
+  --body:"IBM Plex Sans Thai",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --paper:#0f141b; --sheet:#161c25; --ink:#e3e7ee; --ink-2:#a8b1bf; --ink-3:#77818f;
+  --rule:#252d39; --rule-2:#344050; --well:#1c232e; --accent:#9fb8dc; --accent-ink:#0f141b;
+  --lead:#3cc08d; --weak:#e0a83a; --lag:#ec6b74; --impr:#6c9cf0;
+  --lead-bg:rgba(60,192,141,.08); --weak-bg:rgba(224,168,58,.08); --lag-bg:rgba(236,107,116,.08); --impr-bg:rgba(108,156,240,.08);
+  --pos:#3cc08d; --neg:#ec6b74; color-scheme:dark; } }
+:root[data-theme="dark"]{
+  --paper:#0f141b; --sheet:#161c25; --ink:#e3e7ee; --ink-2:#a8b1bf; --ink-3:#77818f;
+  --rule:#252d39; --rule-2:#344050; --well:#1c232e; --accent:#9fb8dc; --accent-ink:#0f141b;
+  --lead:#3cc08d; --weak:#e0a83a; --lag:#ec6b74; --impr:#6c9cf0;
+  --lead-bg:rgba(60,192,141,.08); --weak-bg:rgba(224,168,58,.08); --lag-bg:rgba(236,107,116,.08); --impr-bg:rgba(108,156,240,.08);
+  --pos:#3cc08d; --neg:#ec6b74; color-scheme:dark; }
+
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:var(--body);font-size:14px;line-height:1.55;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 48px}
+.wrap{max-width:1320px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+h1,h2,h3{font-family:var(--display);font-weight:600;margin:0;text-wrap:balance;letter-spacing:-.005em}
+h1{font-size:26px;line-height:1.2}
+h2{font-size:17px;line-height:1.3}
+h3{font-size:14px;line-height:1.35}
+p{margin:0}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.lab{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);font-weight:500}
+.muted{color:var(--ink-2)}
+.sheet{background:var(--sheet);border:1px solid var(--rule);border-radius:10px}
+a{color:var(--impr)}
+
+/* header */
+.mast{display:flex;flex-wrap:wrap;gap:12px 28px;align-items:flex-end;justify-content:space-between}
+.mast .sub{color:var(--ink-2);margin-top:4px;max-width:62ch}
+.meta{display:flex;gap:22px;flex-wrap:wrap}
+.meta div{display:flex;flex-direction:column}
+.meta .v{font-family:var(--mono);font-size:15px;font-weight:500}
+
+/* control rail */
+.rail{display:flex;flex-wrap:wrap;gap:12px 22px;align-items:center;padding:12px 14px}
+.ctl{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+select,input[type=number]{font:inherit;font-size:13px;color:var(--ink);background:var(--well);border:1px solid var(--rule-2);
+  border-radius:6px;padding:6px 8px}
+input[type=number]{width:62px;font-family:var(--mono)}
+.seg{display:inline-flex;border:1px solid var(--rule-2);border-radius:6px;overflow:hidden}
+.seg button{font:inherit;font-size:12.5px;background:transparent;color:var(--ink-2);border:0;padding:6px 11px;cursor:pointer}
+.seg button+button{border-left:1px solid var(--rule-2)}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.seg button:disabled{opacity:.4;cursor:not-allowed}
+.btn{font:inherit;font-size:12.5px;font-weight:500;background:var(--well);color:var(--ink);border:1px solid var(--rule-2);
+  border-radius:6px;padding:6px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{border-color:var(--ink-3)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+button:focus-visible,select:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--impr);outline-offset:2px}
+input[type=range]{accent-color:var(--accent);width:150px}
+#scrub{width:min(240px,60vw)}
+.rail .grow{flex:1}
+
+/* main */
+.main{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:16px;align-items:start}
+.panel-hd{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--rule)}
+.panel-hd .sp{flex:1}
+.panel-bd{padding:14px 16px}
+.rrg-host{position:relative;width:100%;aspect-ratio:1.18/1;max-width:100%}
+.rrg-host canvas{position:absolute;inset:0;width:100%;height:100%;cursor:crosshair;touch-action:manipulation}
+.tip{position:absolute;pointer-events:none;background:var(--sheet);border:1px solid var(--rule-2);border-radius:8px;padding:8px 10px;
+  font-size:12px;box-shadow:0 6px 18px rgba(0,0,0,.14);min-width:170px;z-index:3}
+.tip b{font-family:var(--mono)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;padding:10px 16px;border-top:1px solid var(--rule);font-size:12px;color:var(--ink-2)}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+
+.side{display:flex;flex-direction:column;gap:16px;min-width:0}
+.qgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.qcell{border:1px solid var(--rule);border-radius:8px;padding:9px 11px;min-height:78px}
+.qcell .qn{display:flex;justify-content:space-between;align-items:baseline;font-weight:600;font-size:13px}
+.qcell .qn .num{font-size:18px}
+.qcell .qs{font-family:var(--mono);font-size:11.5px;color:var(--ink-2);margin-top:4px;word-break:break-word}
+.qcell.lead{background:var(--lead-bg)} .qcell.lead .qn{color:var(--lead)}
+.qcell.weak{background:var(--weak-bg)} .qcell.weak .qn{color:var(--weak)}
+.qcell.lag{background:var(--lag-bg)} .qcell.lag .qn{color:var(--lag)}
+.qcell.impr{background:var(--impr-bg)} .qcell.impr .qn{color:var(--impr)}
+.notes{display:flex;flex-direction:column;gap:12px}
+.note{display:grid;grid-template-columns:22px 1fr;gap:8px}
+.note .k{font-family:var(--mono);font-size:11px;color:var(--ink-3);padding-top:2px}
+.note p{font-size:13px}
+.note .tick{font-family:var(--mono);font-size:12px;color:var(--ink-2)}
+
+/* chips */
+.q{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:500;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.q::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.q.lead{color:var(--lead);background:var(--lead-bg)} .q.weak{color:var(--weak);background:var(--weak-bg)}
+.q.lag{color:var(--lag);background:var(--lag-bg)} .q.impr{color:var(--impr);background:var(--impr-bg)}
+
+/* table */
+.tbl-wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:12.5px;min-width:900px}
+th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--rule);white-space:nowrap}
+th{font-weight:500;color:var(--ink-3);font-size:11.5px;cursor:pointer;user-select:none;position:sticky;top:0;background:var(--sheet)}
+th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left}
+td{font-family:var(--mono);font-variant-numeric:tabular-nums}
+td:first-child{font-family:var(--body)}
+td:first-child b{font-family:var(--mono);font-weight:500}
+td:first-child span{display:block;color:var(--ink-3);font-size:11.5px}
+tbody tr{cursor:pointer}
+tbody tr:hover{background:var(--well)}
+tbody tr.sel{background:var(--well);box-shadow:inset 3px 0 0 var(--accent)}
+.pos{color:var(--pos)} .neg{color:var(--neg)}
+th[aria-sort]::after{content:" ↓";color:var(--ink-2)}
+th[aria-sort="ascending"]::after{content:" ↑"}
+
+/* guide */
+.guide{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.guide .card{padding:16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.guide ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px}
+.guide li{font-size:13px}
+code,pre{font-family:var(--mono);font-size:12px}
+code{background:var(--well);padding:1px 5px;border-radius:4px}
+pre{background:var(--well);border:1px solid var(--rule);border-radius:8px;padding:10px 12px;margin:0;overflow-x:auto;line-height:1.5}
+details{border-top:1px solid var(--rule);padding-top:10px}
+summary{cursor:pointer;font-weight:500;font-size:13px}
+.drop{border:1.5px dashed var(--rule-2);border-radius:8px;padding:14px;text-align:center;color:var(--ink-2);font-size:13px}
+.drop.over{border-color:var(--accent);background:var(--well)}
+.status{font-size:12.5px;min-height:1.2em}
+.status.err{color:var(--neg)} .status.ok{color:var(--pos)}
+.method{padding:16px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px 28px}
+.method p{font-size:13px;color:var(--ink-2);max-width:68ch}
+.formula{font-family:var(--mono);font-size:12.5px;color:var(--ink);background:var(--well);border-radius:6px;padding:8px 10px;line-height:1.7}
+.foot{font-size:12px;color:var(--ink-3);text-align:center}
+
+@media (max-width:1000px){ .main{grid-template-columns:1fr} .guide{grid-template-columns:1fr} .method{grid-template-columns:1fr} }
+@media (max-width:520px){ h1{font-size:21px} .rrg-host{aspect-ratio:1/1.05} .rail{gap:10px 14px} input[type=range]{width:110px} }
+@media (prefers-reduced-motion:reduce){ *{transition:none!important;animation:none!important} }
+</style>
+
+<div class="wrap">
+  <header class="mast">
+    <div>
+      <div class="lab">Relative Rotation Graph</div>
+      <h1>RRG Studio</h1>
+      <p class="sub">ดูการหมุนของ ETF หรือหุ้นเทียบกับ benchmark ที่เลือก เลือกชุดตัวอย่างหรืออัปโหลดราคาของคุณเองเป็น CSV คำนวณทั้งหมดในเบราว์เซอร์</p>
+    </div>
+    <div class="meta">
+      <div><span class="lab">ข้อมูล ณ</span><span class="v" id="m-asof">–</span></div>
+      <div><span class="lab">Benchmark</span><span class="v" id="m-bench">–</span></div>
+      <div><span class="lab">จำนวนตัว</span><span class="v" id="m-n">–</span></div>
+      <div><span class="lab">แหล่งข้อมูล</span><span class="v" id="m-src" style="font-family:var(--body);font-size:13px">–</span></div>
+    </div>
+  </header>
+
+  <section class="sheet rail" aria-label="ตัวควบคุม">
+    <div class="ctl"><label class="lab" for="universe">ชุดข้อมูล</label><select id="universe"></select></div>
+    <div class="ctl"><span class="lab">Timeframe</span>
+      <div class="seg" id="tf"><button type="button" data-v="weekly" aria-pressed="true">รายสัปดาห์</button><button type="button" data-v="daily" aria-pressed="false">รายวัน</button></div></div>
+    <div class="ctl"><label class="lab" for="win">Window</label><input type="number" id="win" min="5" max="60" value="14"></div>
+    <div class="ctl"><label class="lab" for="tail">Tail</label><input type="range" id="tail" min="2" max="26" value="10"><span class="num" id="tail-v">10</span></div>
+    <div class="ctl"><label class="lab" for="scrub">วันที่</label><input type="range" id="scrub" min="0" max="0" value="0"><span class="num" id="scrub-v">–</span>
+      <button class="btn" type="button" id="play">▶ เล่น</button><button class="btn" type="button" id="latest">ล่าสุด</button></div>
+    <div class="grow"></div>
+    <button class="btn primary" type="button" id="go-upload">อัปโหลด CSV ของคุณ</button>
+  </section>
+
+  <section class="main">
+    <div class="sheet">
+      <div class="panel-hd"><h2>กราฟการหมุน</h2><span class="muted" id="rrg-sub" style="font-size:12.5px"></span><span class="sp"></span>
+        <span class="muted" style="font-size:12px">ชี้ที่หางเพื่อดูค่า · คลิกเพื่อเลือกดูตัวเดียว</span></div>
+      <div class="panel-bd" style="padding:8px">
+        <div class="rrg-host" id="host"><canvas id="cv" aria-label="Relative Rotation Graph"></canvas><div class="tip" id="tip" hidden></div></div>
+      </div>
+      <div class="legend">
+        <span><i style="background:var(--lead)"></i>Leading · นำตลาดและเร่งขึ้น</span>
+        <span><i style="background:var(--weak)"></i>Weakening · ยังนำแต่แรงลด</span>
+        <span><i style="background:var(--lag)"></i>Lagging · แพ้ตลาดและอ่อนลง</span>
+        <span><i style="background:var(--impr)"></i>Improving · ยังแพ้แต่เริ่มฟื้น</span>
+        <span>ปกติหมุนตามเข็มนาฬิกา ↻</span>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="sheet">
+        <div class="panel-hd"><h2>สรุปตามจตุภาค</h2></div>
+        <div class="panel-bd"><div class="qgrid" id="qgrid"></div></div>
+      </div>
+      <div class="sheet">
+        <div class="panel-hd"><h2>สิ่งที่น่าสนใจตอนนี้</h2><span class="sp"></span><span class="lab">ตามกฎ ไม่ใช่คำแนะนำ</span></div>
+        <div class="panel-bd notes" id="notes"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sheet">
+    <div class="panel-hd"><h2>ตารางจัดอันดับ</h2><span class="muted" id="tbl-sub" style="font-size:12.5px"></span><span class="sp"></span>
+      <span class="muted" style="font-size:12px">คลิกหัวคอลัมน์เพื่อเรียง · คลิกแถวเพื่อเลือก</span></div>
+    <div class="tbl-wrap"><table id="tbl"><thead></thead><tbody></tbody></table></div>
+  </section>
+
+  <section class="sheet" id="members-sec" hidden>
+    <div class="panel-hd"><h2>สมาชิกของแต่ละตะกร้า</h2><span class="muted" style="font-size:12.5px">ดัชนี proxy แบบถ่วงน้ำหนักเท่ากัน rebalance ทุกงวด ไม่ใช่ดัชนีทางการของตลาดหลักทรัพย์ฯ</span></div>
+    <div class="panel-bd" id="members" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px 20px;font-size:12.5px"></div>
+  </section>
+
+  <section class="guide" id="upload-sec">
+    <div class="sheet card">
+      <div class="lab">1 · ข้อมูลที่ต้องใช้</div>
+      <h2>ใช้แค่ราคาปิดเป็นอนุกรมเวลา</h2>
+      <ul>
+        <li><b>ราคาปิดปรับปรุง (adjusted close)</b> ของทุกตัวที่ต้องการเทียบ ปรับเงินปันผลและการแตกพาร์แล้ว</li>
+        <li><b>ราคาของ benchmark</b> ในช่วงวันที่เดียวกัน เช่น SPY, QQQ, ACWI หรือ TDEX (SET50) สำหรับหุ้นไทย</li>
+        <li><b>ความถี่</b> รายวันหรือรายสัปดาห์ ถ้าอัปโหลดรายวัน หน้านี้แปลงเป็นรายสัปดาห์ให้</li>
+        <li><b>ความยาวอย่างน้อย</b> = window × 2 + tail เช่น 14×2+10 = 38 แท่ง แนะนำ 2–5 ปี เพื่อดูประวัติได้</li>
+        <li><b>สกุลเงินเดียวกัน</b> ถ้าเทียบหุ้นไทยกับ ETF ต่างประเทศ ต้องแปลงสกุลก่อน</li>
+      </ul>
+      <p class="muted" style="font-size:12.5px">ไม่ต้องใช้งบการเงิน ปริมาณซื้อขาย หรือ P/E กราฟ RRG ใช้แค่ราคาเทียบกัน</p>
+    </div>
+
+    <div class="sheet card">
+      <div class="lab">2 · ดึงข้อมูล</div>
+      <h2>ใช้สคริปต์ Python ดึงจาก Yahoo Finance</h2>
+      <p class="muted" style="font-size:13px">รันบนเครื่องตัวเองหรือ Google Colab ได้ ไม่ต้องติดตั้งอะไรเพิ่ม หุ้นไทยใส่ <code>.BK</code> ต่อท้าย</p>
+      <pre id="cmd">python fetch_prices.py --bench TDEX.BK \
+  --tickers PTT.BK AOT.BK CPALL.BK KBANK.BK \
+  --interval 1wk --range 5y --out set.csv</pre>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" type="button" data-copy="cmd">คัดลอกคำสั่ง</button><button class="btn" type="button" data-copy="script">คัดลอกสคริปต์ทั้งไฟล์</button></div>
+      <details><summary>ดูสคริปต์ fetch_prices.py</summary><pre id="script" style="margin-top:8px;max-height:280px">/*SCRIPT*/</pre></details>
+      <p class="muted" style="font-size:12.5px">แหล่งอื่นที่ใช้ได้: Bloomberg / Refinitiv, SETSMART, TradingView export, หรือ Excel ของคุณเอง ขอให้ได้รูปแบบ CSV ตามขั้นที่ 3</p>
+    </div>
+
+    <div class="sheet card">
+      <div class="lab">3 · อัปโหลด</div>
+      <h2>วางไฟล์ CSV ที่นี่</h2>
+      <p class="muted" style="font-size:13px">คอลัมน์แรกเป็นวันที่ คอลัมน์ที่สองเป็น <b>benchmark</b> ที่เหลือคือตัวที่ต้องการเทียบ</p>
+<pre>Date,TDEX.BK,PTT.BK,AOT.BK,CPALL.BK
+2026-10-05,8.42,33.25,35.50,49.75
+2026-10-12,8.51,33.75,36.25,50.25
+...</pre>
+      <label class="drop" id="drop" for="file">ลากไฟล์มาวาง หรือ <u>เลือกไฟล์</u><input type="file" id="file" accept=".csv,text/csv,text/plain" hidden></label>
+      <div class="status" id="status"></div>
+    </div>
+  </section>
+
+  <section class="sheet method">
+    <div>
+      <div class="lab" style="margin-bottom:6px">วิธีคำนวณ</div>
+      <div class="formula">RS = 100 × ราคา ÷ benchmark<br>RS-Ratio = 100 + z-score(RS, window)<br>RS-Momentum = 100 + z-score(RS-Ratio, window)</div>
+      <p style="margin-top:10px">สูตร JdK RS-Ratio ของ Julius de Kempenaer เป็นสูตรเฉพาะของบริษัทและไม่ได้เปิดเผย หน้านี้ใช้สูตร z-score แบบเปิด ค่าจึงใกล้เคียงแต่ไม่เท่ากับ Bloomberg, StockCharts หรือ INVX เมื่อทดสอบกับ 11 sector ของ SPDR ณ 26 ต.ค. 2026 ได้จตุภาคตรงกับ INVX 9 จาก 11 ตัว อีก 2 ตัวอยู่ติดเส้น 100</p>
+    </div>
+    <div>
+      <div class="lab" style="margin-bottom:6px">ข้อจำกัด</div>
+      <p>ค่า window สั้นทำให้กราฟไวแต่สัญญาณหลอกมาก ค่ายาวจะช้าแต่นิ่งกว่า ตัวที่อยู่ติดเส้น 100 เปลี่ยนจตุภาคง่าย RRG บอกแค่ราคาเทียบกัน ไม่ได้บอกมูลค่าหรือพื้นฐาน</p>
+      <p style="margin-top:8px"><b>ดัชนีหมวดอุตสาหกรรมและหมวดธุรกิจของ SET</b> ในหน้านี้เป็นตะกร้าหุ้นหลักของแต่ละหมวด ถ่วงน้ำหนักเท่ากัน เพราะไม่มีแหล่งข้อมูลเปิดที่ให้ราคาย้อนหลังของดัชนีทางการ ดัชนีทางการถ่วงด้วยมูลค่าตลาด ผลจึงต่างกันได้ ถ้ามีข้อมูลจาก SETSMART หรือ Settrade ให้อัปโหลด CSV แทน</p>
+      <p style="margin-top:8px"><b>ดัชนีทั่วโลก</b> แปลงเป็นดอลลาร์ด้วยอัตราแลกเปลี่ยนจาก Yahoo แล้วเทียบกับ ACWI เพื่อให้เป็นสกุลเดียวกัน ผลจึงรวมผลของค่าเงินด้วย ไทยใช้ TDEX, เวียดนามใช้ VNM และฟิลิปปินส์ใช้ EPHE แทนดัชนี</p>
+      <p style="margin-top:8px">ชุดหุ้นไทยใช้ TDEX.BK (ETF ที่อิง SET50) แทนดัชนี SET เพราะ Yahoo ไม่มีราคาย้อนหลังของ ^SET.BK ข้อมูลตัวอย่างดึงจาก Yahoo Finance ราคาปรับปรุงแล้ว</p>
+    </div>
+  </section>
+
+  <p class="foot">เพื่อการศึกษาและวิจัย ไม่ใช่คำแนะนำการลงทุน</p>
+</div>
+
+<script>
+const DATA = /*DATA*/;
+const $ = s => document.querySelector(s);
+const QN = {lead:"Leading",weak:"Weakening",lag:"Lagging",impr:"Improving"};
+const QTH = {lead:"นำตลาด",weak:"อ่อนแรง",lag:"แพ้ตลาด",impr:"ฟื้นตัว"};
+const st = {ds:null, tf:"weekly", win:14, tail:10, t:0, sel:null, sort:{k:"ratio",dir:-1}, playing:null, hover:null};
+let calc = null, uploaded = null;
+
+/* ---------- data helpers ---------- */
+function resampleWeekly(d){
+  const out={dates:[],cols:d.cols.map(()=>[])}; let key=null;
+  d.dates.forEach((ds,i)=>{
+    const dt=new Date(ds+"T00:00:00Z"), day=(dt.getUTCDay()+6)%7, mon=new Date(dt-day*864e5).toISOString().slice(0,10);
+    if(mon!==key){ key=mon; out.dates.push(ds); d.cols.forEach((c,j)=>out.cols[j].push(c[i])); }
+    else { const k=out.dates.length-1; out.dates[k]=ds; d.cols.forEach((c,j)=>{ if(c[i]!=null) out.cols[j][k]=c[i]; }); }
+  });
+  return out;
+}
+function rollZ(arr,n){
+  const out=new Array(arr.length).fill(null);
+  for(let i=n-1;i<arr.length;i++){
+    let s=0,ss=0,ok=true;
+    for(let j=i-n+1;j<=i;j++){ const v=arr[j]; if(v==null){ok=false;break;} s+=v; ss+=v*v; }
+    if(!ok) continue;
+    const m=s/n, sd=Math.sqrt(Math.max(0,(ss-n*m*m)/(n-1)));
+    out[i]= sd>0 ? 100+(arr[i]-m)/sd : 100;
+  }
+  return out;
+}
+function series(){
+  const ds=st.ds; let d;
+  if(ds.kind==="preset") d = st.tf==="weekly" ? ds.weekly : ds.daily;
+  else d = st.tf==="weekly" && ds.base==="daily" ? resampleWeekly(ds.raw) : ds.raw;
+  return d;
+}
+function compute(){
+  const d=series(), n=st.win, b=d.cols[0];
+  const syms=st.ds.symbols.map((s,i)=>{
+    const p=d.cols[i+1];
+    const rs=p.map((v,k)=> v!=null && b[k]!=null && b[k]>0 ? 100*v/b[k] : null);
+    const ratio=rollZ(rs,n), mom=rollZ(ratio,n);
+    return {sym:s,name:st.ds.names[s]||"",p,ratio,mom};
+  });
+  const first=syms.reduce((m,s)=>{ const k=s.mom.findIndex(v=>v!=null); return Math.max(m,k<0?d.dates.length:k); },0);
+  calc={d,syms,first};
+}
+const quad=(r,m)=> r>=100 ? (m>=100?"lead":"weak") : (m>=100?"impr":"lag");
+const ret=(p,t,k)=>{ const a=p[t], z=p[t-k]; return a!=null&&z!=null&&t-k>=0 ? a/z-1 : null; };
+const excess=(p,b,t,k)=>{ const r=ret(p,t,k), rb=ret(b,t,k); return r==null||rb==null?null:(1+r)/(1+rb)-1; };
+function ytdIdx(dates,t){ const y=dates[t].slice(0,4); let i=t; while(i>0 && dates[i-1].slice(0,4)===y) i--; return i>0?i-1:i; }
+const COMPASS=["E","NE","N","NW","W","SW","S","SE"];
+function rows(){
+  const {d,syms}=calc, t=st.t, b=d.cols[0], wk=st.tf==="weekly";
+  const K = wk ? {m1:4,m3:13,y1:52} : {m1:21,m3:63,y1:252};
+  const yi=ytdIdx(d.dates,t);
+  return syms.map(s=>{
+    const r=s.ratio[t], m=s.mom[t]; if(r==null||m==null) return null;
+    const q=quad(r,m), pr=s.ratio[t-1], pm=s.mom[t-1];
+    let dwell=1; for(let i=t-1;i>=calc.first && s.ratio[i]!=null && quad(s.ratio[i],s.mom[i])===q;i--) dwell++;
+    const dx=r-(pr??r), dy=m-(pm??m), head=((Math.atan2(dy,dx)*180/Math.PI)+360)%360;
+    const prevQ = pr!=null&&pm!=null ? quad(pr,pm) : q;
+    const p=s.p, ytd = p[t]!=null&&p[yi]!=null&&b[t]!=null&&b[yi]!=null ? (p[t]/p[yi])/(b[t]/b[yi])-1 : null;
+    return {sym:s.sym,name:s.name,q,prevQ,ratio:r,mom:m,dist:Math.hypot(r-100,m-100),
+      angle:((Math.atan2(m-100,r-100)*180/Math.PI)+360)%360,head,compass:COMPASS[Math.round(head/45)%8],
+      speed:Math.hypot(dx,dy),dwell,m1:excess(p,b,t,K.m1),m3:excess(p,b,t,K.m3),ytd,y1:ret(p,t,K.y1)};
+  }).filter(Boolean);
+}
+
+/* ---------- canvas ---------- */
+const cv=$("#cv"), host=$("#host"), tip=$("#tip");
+let geo=null;
+const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+function draw(){
+  const {syms}=calc, t=st.t, from=Math.max(calc.first,t-st.tail+1);
+  const dpr=window.devicePixelRatio||1, W=host.clientWidth, H=host.clientHeight;
+  cv.width=W*dpr; cv.height=H*dpr; const c=cv.getContext("2d"); c.setTransform(dpr,0,0,dpr,0,0);
+  const C={ink:css("--ink"),ink2:css("--ink-2"),ink3:css("--ink-3"),rule:css("--rule"),rule2:css("--rule-2"),sheet:css("--sheet"),
+    lead:css("--lead"),weak:css("--weak"),lag:css("--lag"),impr:css("--impr"),
+    leadbg:css("--lead-bg"),weakbg:css("--weak-bg"),lagbg:css("--lag-bg"),imprbg:css("--impr-bg"),body:css("--body"),mono:css("--mono")};
+  // bounds over visible tails
+  let x0=99,x1=101,y0=99,y1=101;
+  const vis=syms.filter(s=>!st.sel||s.sym===st.sel);
+  vis.forEach(s=>{ for(let i=from;i<=t;i++){ const r=s.ratio[i],m=s.mom[i]; if(r==null||m==null) continue; x0=Math.min(x0,r);x1=Math.max(x1,r);y0=Math.min(y0,m);y1=Math.max(y1,m);} });
+  const ex=Math.max(100-x0,x1-100)*1.12+.15, ey=Math.max(100-y0,y1-100)*1.12+.15;
+  x0=100-ex;x1=100+ex;y0=100-ey;y1=100+ey;
+  const pad={l:44,r:14,t:14,b:34}, pw=W-pad.l-pad.r, ph=H-pad.t-pad.b;
+  const X=v=>pad.l+(v-x0)/(x1-x0)*pw, Y=v=>pad.t+(1-(v-y0)/(y1-y0))*ph;
+  geo={X,Y,from,t};
+  // quadrants
+  const cx=X(100), cy=Y(100);
+  [[cx,pad.t,pad.l+pw-cx,cy-pad.t,C.leadbg],[cx,cy,pad.l+pw-cx,pad.t+ph-cy,C.weakbg],[pad.l,cy,cx-pad.l,pad.t+ph-cy,C.lagbg],[pad.l,pad.t,cx-pad.l,cy-pad.t,C.imprbg]]
+    .forEach(([x,y,w,h,f])=>{c.fillStyle=f;c.fillRect(x,y,w,h);});
+  c.font=`600 12px ${C.body}`; c.textBaseline="top";
+  c.fillStyle=C.lead; c.textAlign="right"; c.fillText("Leading",pad.l+pw-8,pad.t+8);
+  c.fillStyle=C.impr; c.textAlign="left"; c.fillText("Improving",pad.l+8,pad.t+8);
+  c.textBaseline="bottom"; c.fillStyle=C.lag; c.fillText("Lagging",pad.l+8,pad.t+ph-8);
+  c.fillStyle=C.weak; c.textAlign="right"; c.fillText("Weakening",pad.l+pw-8,pad.t+ph-8);
+  // grid + ticks
+  const step=v=>{ const raw=v/5, p=Math.pow(10,Math.floor(Math.log10(raw))); const m=raw/p; return (m<1.5?1:m<3.5?2:m<7.5?5:10)*p; };
+  c.strokeStyle=C.rule; c.lineWidth=1; c.font=`11px ${C.mono}`; c.fillStyle=C.ink3;
+  const sx=step(x1-x0), sy=step(y1-y0);
+  c.textAlign="center"; c.textBaseline="top";
+  for(let v=Math.ceil(x0/sx)*sx; v<=x1; v+=sx){ const x=X(v); c.beginPath();c.moveTo(x,pad.t);c.lineTo(x,pad.t+ph);c.stroke(); c.fillText(v.toFixed(sx<1?1:0),x,pad.t+ph+6); }
+  c.textAlign="right"; c.textBaseline="middle";
+  for(let v=Math.ceil(y0/sy)*sy; v<=y1; v+=sy){ const y=Y(v); c.beginPath();c.moveTo(pad.l,y);c.lineTo(pad.l+pw,y);c.stroke(); c.fillText(v.toFixed(sy<1?1:0),pad.l-6,y); }
+  c.strokeStyle=C.rule2; c.lineWidth=1.5; c.beginPath(); c.moveTo(cx,pad.t);c.lineTo(cx,pad.t+ph);c.moveTo(pad.l,cy);c.lineTo(pad.l+pw,cy);c.stroke();
+  c.fillStyle=C.ink2; c.font=`500 11px ${C.body}`; c.textAlign="center"; c.textBaseline="bottom";
+  c.fillText("RS-Ratio (แนวโน้มเทียบ benchmark) →",pad.l+pw/2,H-2);
+  c.save(); c.translate(11,pad.t+ph/2); c.rotate(-Math.PI/2); c.textBaseline="middle"; c.fillText("RS-Momentum →",0,0); c.restore();
+  // tails
+  const labels=[];
+  syms.forEach(s=>{
+    const dim = (st.sel && s.sym!==st.sel) || (st.hover && s.sym!==st.hover && !st.sel);
+    const pts=[]; for(let i=from;i<=t;i++){ if(s.ratio[i]!=null&&s.mom[i]!=null) pts.push([X(s.ratio[i]),Y(s.mom[i]),i]); }
+    if(!pts.length) return;
+    const last=pts[pts.length-1], q=quad(s.ratio[t],s.mom[t]), col=C[q];
+    c.globalAlpha = st.sel && s.sym!==st.sel ? .12 : dim ? .3 : 1;
+    for(let k=1;k<pts.length;k++){
+      c.strokeStyle=col; c.lineWidth=1.6; c.globalAlpha*=1; const a=(k/pts.length);
+      c.save(); c.globalAlpha=c.globalAlpha*(.25+.75*a); c.beginPath(); c.moveTo(pts[k-1][0],pts[k-1][1]); c.lineTo(pts[k][0],pts[k][1]); c.stroke();
+      c.fillStyle=col; c.beginPath(); c.arc(pts[k-1][0],pts[k-1][1],1.8,0,7); c.fill(); c.restore();
+    }
+    c.fillStyle=col; c.strokeStyle=C.sheet; c.lineWidth=2; c.beginPath(); c.arc(last[0],last[1],5,0,7); c.fill(); c.stroke();
+    labels.push({x:last[0],y:last[1],txt:s.sym.replace(/\.BK$/,""),alpha:c.globalAlpha,col});
+    c.globalAlpha=1;
+  });
+  // labels with simple collision nudge
+  c.font=`500 11.5px ${C.mono}`; c.textBaseline="middle"; c.textAlign="left";
+  const placed=[];
+  labels.forEach(L=>{
+    const w=c.measureText(L.txt).width; let x=L.x+8, y=L.y-9;
+    for(let tries=0;tries<6;tries++){ const hit=placed.some(p=>Math.abs(p.y-y)<12 && x<p.x+p.w && x+w>p.x); if(!hit) break; y+= tries%2? -14*(tries+1) : 14*(tries+1); }
+    if(x+w>W-4) x=L.x-8-w;
+    placed.push({x,y,w}); c.globalAlpha=L.alpha; c.fillStyle=C.ink; c.fillText(L.txt,x,y); c.globalAlpha=1;
+  });
+}
+function nearest(mx,my){
+  if(!geo) return null; let best=null,bd=18;
+  calc.syms.forEach(s=>{ for(let i=geo.from;i<=geo.t;i++){ if(s.ratio[i]==null||s.mom[i]==null) continue;
+    const dd=Math.hypot(geo.X(s.ratio[i])-mx,geo.Y(s.mom[i])-my); if(dd<bd){bd=dd;best={s,i};} } });
+  return best;
+}
+cv.addEventListener("mousemove",e=>{
+  const r=cv.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top, h=nearest(mx,my);
+  const hv=h?h.s.sym:null; if(hv!==st.hover){ st.hover=hv; draw(); }
+  if(!h){ tip.hidden=true; return; }
+  const s=h.s, i=h.i, q=quad(s.ratio[i],s.mom[i]);
+  tip.innerHTML=`<div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><b>${s.sym}</b><span class="q ${q}">${QN[q]}</span></div>
+    <div class="muted" style="margin:2px 0 6px">${s.name}</div>
+    <div class="num">RS-Ratio ${s.ratio[i].toFixed(2)}<br>RS-Mom&nbsp; ${s.mom[i].toFixed(2)}</div>
+    <div class="muted num" style="margin-top:4px">${calc.d.dates[i]}${i===st.t?" · ล่าสุด":""}</div>`;
+  tip.hidden=false;
+  const tw=tip.offsetWidth, th=tip.offsetHeight;
+  tip.style.left=Math.min(mx+14,host.clientWidth-tw-4)+"px"; tip.style.top=Math.max(4,Math.min(my+14,host.clientHeight-th-4))+"px";
+});
+cv.addEventListener("mouseleave",()=>{ tip.hidden=true; if(st.hover){st.hover=null;draw();} });
+cv.addEventListener("click",e=>{
+  const r=cv.getBoundingClientRect(), h=nearest(e.clientX-r.left,e.clientY-r.top);
+  st.sel = h ? (st.sel===h.s.sym?null:h.s.sym) : null; renderAll(false);
+});
+
+/* ---------- side + table ---------- */
+const pct=v=> v==null?"–":`<span class="${v>=0?"pos":"neg"}">${v>=0?"+":""}${(v*100).toFixed(1)}%</span>`;
+const short=s=>s.replace(/\.BK$/,"");
+function side(R){
+  const by={lead:[],weak:[],impr:[],lag:[]}; R.forEach(r=>by[r.q].push(r));
+  $("#qgrid").innerHTML=["impr","lead","lag","weak"].map(q=>`<div class="qcell ${q}"><div class="qn"><span>${QN[q]} · ${QTH[q]}</span><span class="num">${by[q].length}</span></div>
+    <div class="qs">${by[q].sort((a,b)=>b.ratio-a.ratio).map(r=>short(r.sym)).join(" · ")||"–"}</div></div>`).join("");
+  const N=[], unit=st.tf==="weekly"?"สัปดาห์":"วัน";
+  const moved=q=>R.filter(r=>r.q===q&&r.prevQ!==q);
+  const list=a=>a.map(r=>short(r.sym)).join(", ");
+  if(moved("impr").length) N.push(["↗",`<b>${list(moved("impr"))}</b> เพิ่งเข้า Improving`,"momentum ข้าม 100 ขณะที่แนวโน้มยังต่ำกว่า เป็นจุดเริ่มต้นของรอบใหม่ งานของ Optuma (2016) พบว่าการเข้า Improving ให้ผลตอบแทน 21 วันถัดไปดีที่สุดในสี่จตุภาค"]);
+  if(moved("lead").length) N.push(["▲",`<b>${list(moved("lead"))}</b> เพิ่งเข้า Leading`,"อ่านเป็นการยืนยันมากกว่าจุดเข้า เพราะเมื่อทั้งสองแกนข้าม 100 การเคลื่อนไหวมักไปมากแล้ว"]);
+  if(moved("weak").length) N.push(["↘",`<b>${list(moved("weak"))}</b> เพิ่งเข้า Weakening`,"ยังนำตลาดแต่แรงส่งลดลง เป็นจุดที่ควรทบทวนน้ำหนักหรือตั้งจุดตัดขาดทุน"]);
+  if(moved("lag").length) N.push(["▼",`<b>${list(moved("lag"))}</b> เพิ่งเข้า Lagging`,"แพ้ตลาดทั้งสองแกน ขั้นถัดไปที่พบบ่อยที่สุดคือ Improving"]);
+  const ne=R.filter(r=>r.head>=22.5&&r.head<=67.5&&r.speed>0);
+  if(ne.length) N.push(["NE",`<b>${list(ne)}</b> กำลังวิ่งไปทางตะวันออกเฉียงเหนือ`,"แนวโน้มและแรงส่งดีขึ้นพร้อมกัน เป็นทิศที่แข็งแรงที่สุดบนกราฟ"]);
+  const sw=R.filter(r=>r.head>=202.5&&r.head<=247.5&&r.speed>0);
+  if(sw.length) N.push(["SW",`<b>${list(sw)}</b> กำลังวิ่งไปทางตะวันตกเฉียงใต้`,"ทั้งแนวโน้มและแรงส่งแย่ลงพร้อมกัน"]);
+  const top=[...R].sort((a,b)=>b.ratio-a.ratio)[0], bot=[...R].sort((a,b)=>a.ratio-b.ratio)[0];
+  if(top) N.push(["±",`แนวโน้มแข็งสุด <b>${short(top.sym)}</b> · อ่อนสุด <b>${short(bot.sym)}</b>`,`<span class="tick">RS-Ratio ${top.ratio.toFixed(2)} / ${bot.ratio.toFixed(2)}</span>`]);
+  const stuck=R.filter(r=>r.dwell>=8).sort((a,b)=>b.dwell-a.dwell);
+  if(stuck.length) N.push(["⏱",`<b>${stuck.map(r=>`${short(r.sym)} (${r.dwell} ${unit})`).join(", ")}</b> อยู่จตุภาคเดิมนาน`,"แนวโน้มที่อยู่นานมักต่อเนื่อง ดูประกอบกับทิศของหาง"]);
+  $("#notes").innerHTML=N.map(([k,h,p])=>`<div class="note"><span class="k">${k}</span><div><p>${h}</p><p class="muted" style="font-size:12.5px;margin-top:2px">${p}</p></div></div>`).join("");
+}
+const COLS=[
+  ["sym","ชื่อ"],["q","จตุภาค"],["ratio","RS-Ratio"],["mom","RS-Mom"],["dist","ระยะ"],["head","ทิศ"],["speed","ความเร็ว"],["dwell","อยู่มา"],
+  ["m1","1M vs B"],["m3","3M vs B"],["ytd","YTD vs B"],["y1","1Y ราคา"]];
+function table(R){
+  const k=st.sort.k, dir=st.sort.dir, qo={lead:0,weak:1,lag:2,impr:3};
+  R.sort((a,b)=>{ const va=k==="q"?qo[a.q]:a[k], vb=k==="q"?qo[b.q]:b[k];
+    if(typeof va==="string") return va.localeCompare(vb)*dir; return ((va??-1e9)-(vb??-1e9))*dir; });
+  $("#tbl thead").innerHTML="<tr>"+COLS.map(([c,l])=>`<th data-k="${c}" ${c===k?`aria-sort="${dir>0?"ascending":"descending"}"`:""}>${l}</th>`).join("")+"</tr>";
+  const unit=st.tf==="weekly"?"w":"d";
+  $("#tbl tbody").innerHTML=R.map(r=>`<tr data-s="${r.sym}" class="${st.sel===r.sym?"sel":""}">
+    <td><b>${r.sym}</b><span>${r.name}</span></td><td><span class="q ${r.q}">${QN[r.q]}</span></td>
+    <td>${r.ratio.toFixed(2)}</td><td>${r.mom.toFixed(2)}</td><td>${r.dist.toFixed(2)}</td>
+    <td>${r.compass} ${Math.round(r.head)}°</td><td>${r.speed.toFixed(2)}</td><td>${r.dwell}${unit}</td>
+    <td>${pct(r.m1)}</td><td>${pct(r.m3)}</td><td>${pct(r.ytd)}</td><td>${pct(r.y1)}</td></tr>`).join("");
+}
+$("#tbl thead").addEventListener("click",e=>{ const th=e.target.closest("th"); if(!th) return; const k=th.dataset.k;
+  st.sort = st.sort.k===k ? {k,dir:-st.sort.dir} : {k,dir:(k==="sym"||k==="q")?1:-1}; renderAll(false); });
+$("#tbl tbody").addEventListener("click",e=>{ const tr=e.target.closest("tr"); if(!tr) return; st.sel = st.sel===tr.dataset.s?null:tr.dataset.s; renderAll(false); });
+
+/* ---------- render ---------- */
+function renderAll(recompute=true){
+  if(recompute){ compute(); const sc=$("#scrub"); sc.min=calc.first; sc.max=calc.d.dates.length-1; if(st.t<calc.first||st.t>+sc.max||recompute==="reset") st.t=+sc.max; sc.value=st.t; }
+  const d=calc.d, R=rows();
+  $("#scrub-v").textContent=d.dates[st.t]||"–";
+  $("#m-asof").textContent=d.dates[d.dates.length-1];
+  $("#m-bench").textContent=st.ds.bench; $("#m-n").textContent=st.ds.symbols.length;
+  $("#m-src").textContent=st.ds.kind==="preset"?"Yahoo Finance":"ไฟล์ของคุณ";
+  const tfl=st.tf==="weekly"?"สัปดาห์":"วัน";
+  $("#rrg-sub").textContent=`${d.dates[st.t]} · หาง ${st.tail} ${tfl} · window ${st.win}`;
+  $("#tbl-sub").textContent=`${d.dates[st.t]} · ผลตอบแทนส่วนเกินเทียบ ${st.ds.bench}`;
+  if(!R.length){ $("#notes").innerHTML=`<p class="muted">ข้อมูลยังไม่พอ ต้องมีอย่างน้อย ${st.win*2} แท่ง ลองลด window</p>`; }
+  side(R); table(R); draw();
+  const mem=st.ds.members; $("#members-sec").hidden=!mem;
+  if(mem) $("#members").innerHTML=Object.entries(mem).map(([k,v])=>`<div><b class="num">${k}</b> <span class="muted">${(st.ds.names[k]||"").split(" · ")[0]}</span><div class="num muted" style="font-size:11.5px">${v.join(" · ")}</div></div>`).join("");
+}
+function setDataset(ds){
+  st.ds=ds; st.sel=null;
+  const daily = ds.kind==="preset" || ds.base==="daily";
+  const tfb=[...document.querySelectorAll("#tf button")];
+  tfb[1].disabled=!daily; if(!daily) st.tf="weekly";
+  tfb.forEach(b=>b.setAttribute("aria-pressed",b.dataset.v===st.tf));
+  renderAll("reset");
+}
+
+/* ---------- controls ---------- */
+const sel=$("#universe");
+const GROUPS=[["ไทย",["set-industry","set-sector","set-large"]],["ทั่วโลก",["world-dev","world-em","country"]],["สหรัฐฯ",["us-sector","us-theme","us-mega"]]];
+GROUPS.forEach(([g,ids])=>{ const og=document.createElement("optgroup"); og.label=g;
+  ids.forEach(id=>{ const p=DATA.presets.find(x=>x.id===id); if(!p) return; const o=document.createElement("option"); o.value=p.id; o.textContent=`${p.name} · vs ${p.bench}`; og.append(o); });
+  sel.append(og); });
+sel.addEventListener("change",()=>{ if(sel.value==="upload"&&uploaded) setDataset(uploaded); else setDataset({kind:"preset",...DATA.presets.find(p=>p.id===sel.value)}); });
+$("#tf").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b||b.disabled) return; st.tf=b.dataset.v;
+  document.querySelectorAll("#tf button").forEach(x=>x.setAttribute("aria-pressed",x===b)); renderAll("reset"); });
+$("#win").addEventListener("change",e=>{ st.win=Math.max(5,Math.min(60,+e.target.value||14)); e.target.value=st.win; renderAll(true); });
+$("#tail").addEventListener("input",e=>{ st.tail=+e.target.value; $("#tail-v").textContent=st.tail; renderAll(false); });
+$("#scrub").addEventListener("input",e=>{ st.t=+e.target.value; renderAll(false); });
+$("#latest").addEventListener("click",()=>{ stop(); st.t=calc.d.dates.length-1; $("#scrub").value=st.t; renderAll(false); });
+function stop(){ if(st.playing){ clearInterval(st.playing); st.playing=null; $("#play").textContent="▶ เล่น"; } }
+$("#play").addEventListener("click",()=>{
+  if(st.playing) return stop();
+  const end=calc.d.dates.length-1; if(st.t>=end) st.t=Math.max(calc.first,end-(st.tf==="weekly"?52:120));
+  $("#play").textContent="❚❚ หยุด";
+  st.playing=setInterval(()=>{ st.t++; $("#scrub").value=st.t; renderAll(false); if(st.t>=end) stop(); }, st.tf==="weekly"?160:70);
+});
+$("#go-upload").addEventListener("click",()=>{ $("#upload-sec").scrollIntoView({behavior:"smooth",block:"start"}); });
+new ResizeObserver(()=>calc&&draw()).observe(host);
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change",()=>calc&&draw());
+new MutationObserver(()=>calc&&draw()).observe(document.documentElement,{attributes:true,attributeFilter:["data-theme"]});
+
+/* copy */
+document.querySelectorAll("[data-copy]").forEach(b=>b.addEventListener("click",()=>{
+  const el=document.getElementById(b.dataset.copy), txt=el.textContent, old=b.textContent;
+  const done=()=>{ b.textContent="คัดลอกแล้ว"; setTimeout(()=>b.textContent=old,1400); };
+  try{ navigator.clipboard.writeText(txt).then(done,()=>selectText(el)); }catch(e){ selectText(el); }
+}));
+function selectText(el){ const r=document.createRange(); r.selectNodeContents(el); const s=getSelection(); s.removeAllRanges(); s.addRange(r); }
+
+/* ---------- CSV upload ---------- */
+function splitLine(l,delim){
+  // แยกคอลัมน์โดยเคารพเครื่องหมายคำพูด เช่น "1,234.50"
+  const out=[]; let cur="", q=false;
+  for(let i=0;i<l.length;i++){ const ch=l[i];
+    if(ch==='"'){ if(q&&l[i+1]==='"'){cur+='"';i++;} else q=!q; }
+    else if(ch===delim&&!q){ out.push(cur); cur=""; }
+    else cur+=ch; }
+  out.push(cur); return out.map(x=>x.trim());
+}
+function parseDate(s,order){
+  s=s.trim();
+  let m=s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/); if(m) return `${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`;
+  m=s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
+  if(m){ let y=+m[3]; if(y>2400) y-=543; const [dd,mm]= order==="mdy"?[m[2],m[1]]:[m[1],m[2]];
+    if(+mm<1||+mm>12||+dd<1||+dd>31) return null; return `${y}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`; }
+  const d=new Date(s); return isNaN(d)?null:d.toISOString().slice(0,10);
+}
+function dateOrder(vals){
+  // DD/MM (ค่าเริ่มต้นแบบไทย) หรือ MM/DD (ไฟล์จากโปรแกรมฝั่งสหรัฐฯ) ดูจากค่าที่เกิน 12
+  let dmy=false, mdy=false;
+  vals.forEach(v=>{ const m=v.match(/^(\d{1,2})[-/.](\d{1,2})[-/.]\d{4}/); if(!m) return; if(+m[1]>12) dmy=true; if(+m[2]>12) mdy=true; });
+  return mdy&&!dmy ? "mdy" : "dmy";
+}
+function parseCSV(text){
+  const lines=text.replace(/^\uFEFF/,"").replace(/\r/g,"").split("\n").filter(l=>l.trim());
+  if(lines.length<3) throw new Error("ไฟล์มีข้อมูลน้อยเกินไป ต้องมีแถวหัวตารางและข้อมูลอย่างน้อย 2 แถว");
+  const delim = lines[0].includes("\t") ? "\t" : (lines[0].match(/;/g)||[]).length > (lines[0].match(/,/g)||[]).length ? ";" : ",";
+  const head=splitLine(lines[0],delim);
+  if(head.length<3) throw new Error("ต้องมีอย่างน้อย 3 คอลัมน์: Date, benchmark และอย่างน้อย 1 ตัวที่ต้องการเทียบ");
+  const body=lines.slice(1).map(l=>splitLine(l,delim)), order=dateOrder(body.map(c=>c[0]));
+  const byDate=new Map();
+  for(const c of body){
+    const d=parseDate(c[0],order); if(!d) continue;
+    byDate.set(d,[d,...head.slice(1).map((_,j)=>{ const v=parseFloat((c[j+1]||"").replace(/[,\s]/g,"")); return isFinite(v)&&v>0?v:null; })]);
+  }
+  const rows=[...byDate.values()];  // วันที่ซ้ำ ใช้แถวหลังสุด
+  if(rows.length<10) throw new Error("อ่านวันที่ไม่ได้ ใช้รูปแบบ YYYY-MM-DD หรือ DD/MM/YYYY ในคอลัมน์แรก");
+  rows.sort((a,b)=>a[0]<b[0]?-1:1);
+  const ff=head.slice(1).map(()=>null);
+  rows.forEach(r=>{ for(let j=1;j<r.length;j++){ if(r[j]==null) r[j]=ff[j-1]; else ff[j-1]=r[j]; } });
+  const dates=rows.map(r=>r[0]), cols=head.slice(1).map((_,j)=>rows.map(r=>r[j+1]));
+  const gaps=dates.slice(1).map((d,i)=>(new Date(d)-new Date(dates[i]))/864e5).sort((a,b)=>a-b);
+  const base = gaps[Math.floor(gaps.length/2)]>4 ? "weekly":"daily";
+  const syms=head.slice(2), names={}; syms.forEach(s=>names[s]="");
+  return {kind:"upload",name:"ไฟล์ของคุณ",bench:head[1],symbols:syms,names,raw:{dates,cols},base};
+}
+function loadFile(f){
+  const r=new FileReader();
+  r.onload=()=>{ try{
+      const ds=parseCSV(String(r.result)); const n=(ds.base==="daily"?resampleWeekly(ds.raw):ds.raw).dates.length;
+      if(n<st.win*2+2) throw new Error(`ข้อมูลรายสัปดาห์มีแค่ ${n} แท่ง ต้องมีอย่างน้อย ${st.win*2+2} แท่ง (ลด window หรือเพิ่มช่วงเวลา)`);
+      uploaded=ds; let o=sel.querySelector('option[value="upload"]');
+      if(!o){ o=document.createElement("option"); o.value="upload"; sel.prepend(o); }
+      o.textContent=`${f.name} · vs ${ds.bench}`; sel.value="upload"; setDataset(ds);
+      $("#status").className="status ok"; $("#status").textContent=`โหลดแล้ว ${ds.symbols.length} ตัว · ${ds.raw.dates.length} แถว (${ds.base==="daily"?"รายวัน":"รายสัปดาห์"}) · ${ds.raw.dates[0]} ถึง ${ds.raw.dates.at(-1)}`;
+      window.scrollTo({top:0,behavior:"smooth"});
+    }catch(e){ $("#status").className="status err"; $("#status").textContent=e.message; } };
+  r.readAsText(f);
+}
+$("#file").addEventListener("change",e=>e.target.files[0]&&loadFile(e.target.files[0]));
+const drop=$("#drop");
+["dragenter","dragover"].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.add("over");}));
+["dragleave","drop"].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.remove("over");}));
+drop.addEventListener("drop",e=>e.dataTransfer.files[0]&&loadFile(e.dataTransfer.files[0]));
+
+/* boot */
+sel.value="set-industry"; setDataset({kind:"preset",...DATA.presets.find(p=>p.id==="set-industry")});
+</script>
