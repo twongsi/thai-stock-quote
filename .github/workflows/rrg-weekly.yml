@@ -8,8 +8,7 @@ on:
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
+  actions: write
 
 concurrency:
   group: rrg-weekly-${{ github.ref }}
@@ -51,20 +50,10 @@ jobs:
             git push || { git pull --rebase -X theirs && git push; }
           fi
 
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: rrg/docs
-
-  # Publishes rrg/docs as the site when Settings → Pages → Source is "GitHub Actions".
-  # A separate job, so a missing Pages setup or a branch the github-pages environment
-  # does not allow never blocks the data update above
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-    steps:
-      - id: deploy
-        uses: actions/deploy-pages@v4
+      # GitHub Pages is published by fund-dashboard.yml (RRG Studio at the root, the
+      # fund dashboard at /fund/), so start it to publish the page committed above
+      - name: Publish GitHub Pages
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run fund-dashboard.yml --repo "$GITHUB_REPOSITORY" --ref main

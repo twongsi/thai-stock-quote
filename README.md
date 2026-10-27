@@ -37,7 +37,7 @@ recon.py -> map how a web page delivers its data (tables, forms, JS endpoints, H
 
 ## Automation
 
-.github/workflows/update-data.yml runs the SET100 scripts on weekdays at 18:40 Bangkok time and commits the results. .github/workflows/market-data.yml then runs market_download.py and `consensus.py --all-symbols --out-dir data/market/consensus` for the whole market at 18:52. It can also be started by hand from the Actions tab. .github/workflows/ci.yml runs the tests on every push. .github/workflows/rrg-weekly.yml rebuilds the RRG Studio page and sector rotation report on Saturdays and can deploy rrg/docs to GitHub Pages.
+.github/workflows/update-data.yml runs the SET100 scripts on weekdays at 18:40 Bangkok time and commits the results. .github/workflows/market-data.yml then runs market_download.py and `consensus.py --all-symbols --out-dir data/market/consensus` for the whole market at 18:52. It can also be started by hand from the Actions tab. .github/workflows/ci.yml runs the tests on every push. .github/workflows/rrg-weekly.yml rebuilds the RRG Studio page and sector rotation report on Saturdays, then starts .github/workflows/fund-dashboard.yml, which publishes the GitHub Pages site: RRG Studio (rrg/docs) at the root and the Thai Fund Dashboard at /fund/.
 
 ## Setup
 
@@ -57,6 +57,25 @@ pytest -q
 ## Caveats
 
 The backtest uses today's SET100 list for the whole history, so it has survivorship bias. Yahoo's Thai price history has split and adjustment errors, which analytics.py repairs (see clean_prices and total_return_index). Analyst consensus figures belong to their publishers; use them for personal research. Nothing here is investment advice.
+
+## Thai Fund Dashboard — `fund_dashboard/`
+
+Dashboard กองทุนรวมไทยครบจบในหน้าเดียว ดึงข้อมูลจาก **SEC Open Data API (v2)**:
+NAV ล่าสุด, ผลตอบแทนทุกช่วงเวลา, ค่าความเสี่ยง, กราฟ NAV ย้อนหลัง, พอร์ตการลงทุน,
+ค่าธรรมเนียม และเปรียบเทียบหลายกองทุนบนกราฟเดียวกัน
+
+```bash
+cd fund_dashboard
+cp .env.example .env     # ใส่ SEC_API_KEY ที่ขอจาก https://secopendata.sec.or.th/
+python3 server.py        # เปิด http://127.0.0.1:8765
+python3 server.py --demo # ลองดูหน้าตาก่อนโดยไม่ต้องใช้ API Key
+```
+
+ใช้ Python standard library ล้วน ไม่ต้องติดตั้ง package เพิ่ม — รายละเอียดทั้งหมดอยู่ใน
+[fund_dashboard/README.md](fund_dashboard/README.md)
+
+บน GitHub: workflow `.github/workflows/fund-dashboard.yml` ดึงข้อมูลทุกวันทำการ (API Key เก็บใน repository secret ชื่อ `SEC_API_KEY`)
+แล้ว deploy หน้า GitHub Pages ของ repo นี้ — dashboard กองทุนอยู่ที่ `/fund/` ส่วน RRG Studio อยู่ที่หน้าแรก
 
 ## MiroFish — multi-agent stock simulator
 

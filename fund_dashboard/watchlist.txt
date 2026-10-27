@@ -1,0 +1,8 @@
+# รายชื่อกองทุนที่จะ build ขึ้น GitHub Pages (บรรทัดละ 1 กอง, ใส่ # ข้างหน้าเพื่อปิดชั่วคราว)
+# ใส่เป็นชื่อย่อกองทุน หรือชื่อชนิดหน่วยลงทุนก็ได้ เช่น SCBNDQ(A)
+SCBNDQ(A)
+K-ATECH-A(A)
+SCBSET50(A)
+K-FIXED-A
+KFGBRAND-A
+TMBGOLDS

@@ -6,3 +6,8 @@ __pycache__/
 .pytest_cache/
 .ipynb_checkpoints/
 .env
+
+# Thai Fund Dashboard
+fund_dashboard/.env
+fund_dashboard/cache/
+site/
