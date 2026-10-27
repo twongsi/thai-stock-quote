@@ -104,3 +104,13 @@ def test_export_sandbox_data_drops_odd_lot_print_in_bond_etf(tmp_path):
         pd.DataFrame({'Date': idx, 'Close': close, 'Adj Close': close}).to_csv(f, index=False)
     data = a.export_sandbox_data(str(tmp_path / 'out.js'), str(tmp_path))
     assert np.allclose(data['series']['ABFTH'], 100)
+
+
+def test_metrics_skips_stock_with_exactly_one_year_of_weeks():
+    # Return1Y needs this week and the week 52 weeks earlier, i.e. 53 rows
+    idx = weekly(60)
+    prices = pd.DataFrame({'OLD': 1.01 ** np.arange(60),
+                           'NEW': np.r_[[np.nan] * 8, 1.01 ** np.arange(52)]}, index=idx)
+    m = a.metrics(prices, close=prices)
+    assert list(m.index) == ['OLD']
+    assert np.isclose(m.loc['OLD', 'Return1Y'], 1.01 ** 52 - 1)

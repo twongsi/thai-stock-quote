@@ -191,7 +191,7 @@ def metrics(prices, close=None, rf=0.02):
     for t in prices.columns:
         p = prices[t].dropna()
         r = rets[t].dropna()
-        if len(p) < WEEKS_PER_YEAR:
+        if len(p) <= WEEKS_PER_YEAR:   # Return1Y needs the week a full year back
             continue
         years = (p.index[-1] - p.index[0]).days / 365.25
         cagr = (p.iloc[-1] / p.iloc[0]) ** (1 / years) - 1
