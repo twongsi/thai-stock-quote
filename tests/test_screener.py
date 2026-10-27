@@ -102,3 +102,10 @@ def test_universe_all_joins_symbols_and_filters_by_market(tmp_path):
 def test_market_filters_need_universe_all():
     with pytest.raises(SystemExit):
         screener.parse_args(['--market', 'mai'])
+
+
+def test_new_listing_with_two_weeks_is_screened(tmp_path):
+    write_prices(tmp_path, 'QUICK', [7.1, 6.1])
+    write_prices(tmp_path, 'PTT', np.linspace(10, 20, 60))
+    m = screener.load_metrics(tmp_path).set_index('ticker')
+    assert m.loc['QUICK', 'close'] == 6.1 and 'PTT' in m.index
