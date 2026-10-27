@@ -533,23 +533,42 @@ document.querySelectorAll("[data-copy]").forEach(b=>b.addEventListener("click",(
 function selectText(el){ const r=document.createRange(); r.selectNodeContents(el); const s=getSelection(); s.removeAllRanges(); s.addRange(r); }
 
 /* ---------- CSV upload ---------- */
-function parseDate(s){
-  s=s.trim().replace(/^"|"$/g,"");
+function splitLine(l,delim){
+  // แยกคอลัมน์โดยเคารพเครื่องหมายคำพูด เช่น "1,234.50"
+  const out=[]; let cur="", q=false;
+  for(let i=0;i<l.length;i++){ const ch=l[i];
+    if(ch==='"'){ if(q&&l[i+1]==='"'){cur+='"';i++;} else q=!q; }
+    else if(ch===delim&&!q){ out.push(cur); cur=""; }
+    else cur+=ch; }
+  out.push(cur); return out.map(x=>x.trim());
+}
+function parseDate(s,order){
+  s=s.trim();
   let m=s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/); if(m) return `${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`;
-  m=s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/); if(m){ let y=+m[3]; if(y>2400) y-=543; return `${y}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`; }
+  m=s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
+  if(m){ let y=+m[3]; if(y>2400) y-=543; const [dd,mm]= order==="mdy"?[m[2],m[1]]:[m[1],m[2]];
+    if(+mm<1||+mm>12||+dd<1||+dd>31) return null; return `${y}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`; }
   const d=new Date(s); return isNaN(d)?null:d.toISOString().slice(0,10);
 }
+function dateOrder(vals){
+  // DD/MM (ค่าเริ่มต้นแบบไทย) หรือ MM/DD (ไฟล์จากโปรแกรมฝั่งสหรัฐฯ) ดูจากค่าที่เกิน 12
+  let dmy=false, mdy=false;
+  vals.forEach(v=>{ const m=v.match(/^(\d{1,2})[-/.](\d{1,2})[-/.]\d{4}/); if(!m) return; if(+m[1]>12) dmy=true; if(+m[2]>12) mdy=true; });
+  return mdy&&!dmy ? "mdy" : "dmy";
+}
 function parseCSV(text){
-  const lines=text.replace(/\r/g,"").split("\n").filter(l=>l.trim());
+  const lines=text.replace(/^\uFEFF/,"").replace(/\r/g,"").split("\n").filter(l=>l.trim());
   if(lines.length<3) throw new Error("ไฟล์มีข้อมูลน้อยเกินไป ต้องมีแถวหัวตารางและข้อมูลอย่างน้อย 2 แถว");
-  const delim = (lines[0].match(/;/g)||[]).length > (lines[0].match(/,/g)||[]).length ? ";" : lines[0].includes("\t")?"\t":",";
-  const head=lines[0].split(delim).map(h=>h.trim().replace(/^"|"$/g,""));
+  const delim = lines[0].includes("\t") ? "\t" : (lines[0].match(/;/g)||[]).length > (lines[0].match(/,/g)||[]).length ? ";" : ",";
+  const head=splitLine(lines[0],delim);
   if(head.length<3) throw new Error("ต้องมีอย่างน้อย 3 คอลัมน์: Date, benchmark และอย่างน้อย 1 ตัวที่ต้องการเทียบ");
-  const rows=[];
-  for(const l of lines.slice(1)){
-    const c=l.split(delim); const d=parseDate(c[0]); if(!d) continue;
-    rows.push([d,...head.slice(1).map((_,j)=>{ const v=parseFloat((c[j+1]||"").replace(/[",\s]/g,"")); return isFinite(v)&&v>0?v:null; })]);
+  const body=lines.slice(1).map(l=>splitLine(l,delim)), order=dateOrder(body.map(c=>c[0]));
+  const byDate=new Map();
+  for(const c of body){
+    const d=parseDate(c[0],order); if(!d) continue;
+    byDate.set(d,[d,...head.slice(1).map((_,j)=>{ const v=parseFloat((c[j+1]||"").replace(/[,\s]/g,"")); return isFinite(v)&&v>0?v:null; })]);
   }
+  const rows=[...byDate.values()];  // วันที่ซ้ำ ใช้แถวหลังสุด
   if(rows.length<10) throw new Error("อ่านวันที่ไม่ได้ ใช้รูปแบบ YYYY-MM-DD หรือ DD/MM/YYYY ในคอลัมน์แรก");
   rows.sort((a,b)=>a[0]<b[0]?-1:1);
   const ff=head.slice(1).map(()=>null);

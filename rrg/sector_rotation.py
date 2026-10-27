@@ -53,7 +53,24 @@ def load_prices(symbols: list[str], bench: str, interval="1wk", rng="10y") -> pd
     df = pd.DataFrame(cols)
     df.index = pd.to_datetime(df.index)
     df = df.sort_index()
-    return df[df[bench].notna()].ffill(limit=2)
+    df = clean_prices(df[df[bench].notna()])
+    return df.ffill(limit=2)
+
+
+def clean_prices(prices: pd.DataFrame, window=9, max_ratio=1.8) -> pd.DataFrame:
+    """ตัดราคาที่ห่างจากค่ามัธยฐานรอบข้างเกิน max_ratio เท่า (Yahoo ไทยบางสัปดาห์ราคากระโดด 10 เท่าแล้วกลับ)
+    วิธีเดียวกับ analytics.clean_prices ที่ราก repo"""
+    median = prices.rolling(window, center=True, min_periods=3).median()
+    ratio = prices / median
+    return prices.where((ratio < max_ratio) & (ratio > 1 / max_ratio) | prices.isna())
+
+
+def big_moves(prices: pd.DataFrame, threshold=0.5) -> pd.DataFrame:
+    """รายการสัปดาห์ที่ราคาเปลี่ยนเกิน threshold ไว้ตรวจด้วยตา: อาจเป็นข่าวจริง หรือ corporate action
+    ที่ Yahoo ไม่ได้ปรับ (เช่นการควบรวม) ถ้าเป็นอย่างหลังให้เพิ่มใน fetch_prices.KNOWN_ADJUSTMENTS"""
+    r = prices.pct_change(fill_method=None)
+    s = r.where(r.abs() > threshold).stack().dropna()  # pandas 3 เก็บ NaN ไว้ใน stack()
+    return s.rename("return").reset_index().rename(columns={"level_0": "date", "level_1": "symbol"})
 
 
 # ------------------------------------------------------------------ 3. Sector index
@@ -138,8 +155,9 @@ def score(ratio, mom, quad, stats, w=(0.4, 0.3, 0.2, 0.1)):
 def backtest(idx: pd.DataFrame, bench: pd.Series, sc: pd.DataFrame, top=3, rebalance=4,
              cost_bps=15.0, trend=None, periods_per_year=52):
     """ถือ top-k หมวดคะแนนสูงสุด เท่า ๆ กัน, rebalance ทุก `rebalance` งวด
-       ผลตอบแทนพอร์ต   R_p,t+1 = Σ w_i,t · r_i,t+1 − cost · turnover_t
-       turnover_t     = ½ Σ |w_i,t − w_i,t−1|
+       ผลตอบแทนพอร์ต   R_p,t+1 = Σ w_i,t · r_i,t+1 − cost · traded_t
+       traded_t       = Σ |w_i,t − w_i,t−1|   (ทั้งฝั่งซื้อและขาย, cost คิดต่อข้าง; งวดแรกนับการซื้อจากเงินสด)
+       turnover_t     = ½ · traded_t          (one-way turnover ที่รายงาน)
        ถ้าใส่ trend   → หมวดที่อยู่ใต้เส้น 40 สัปดาห์จะถูกตัดออก (ส่วนที่เหลือถือเงินสด)"""
     r = idx.pct_change(fill_method=None).fillna(0)
     rb = bench.pct_change(fill_method=None).fillna(0)
@@ -158,9 +176,10 @@ def backtest(idx: pd.DataFrame, bench: pd.Series, sc: pd.DataFrame, top=3, rebal
             if len(pick):
                 cur[pick] = 1.0 / top  # ช่องที่เลือกไม่ได้ = เงินสด
         w.loc[d] = cur
-    turnover = w.diff().abs().sum(axis=1).fillna(w.iloc[0].abs().sum()) / 2
+    traded = w.diff().fillna(w).abs().sum(axis=1)
+    turnover = traded / 2
     gross = (w.shift(1) * r.loc[dates]).sum(axis=1)
-    net = gross - turnover.shift(1).fillna(0) * cost_bps / 1e4
+    net = gross - traded.shift(1).fillna(0) * cost_bps / 1e4
     ew = r.loc[dates].mean(axis=1)  # ถือทุกหมวดเท่ากัน — ใช้แยกผลของ "การเลือก" ออกจากผลของ "การถ่วงเท่ากัน"
     res = pd.DataFrame({"strategy": net, "benchmark": rb.loc[dates], "equal_weight_all": ew})
     return res, w, turnover
@@ -224,6 +243,7 @@ def main():
     allsyms = sorted({s for v in members.values() for s in v})
     prices = load_prices(allsyms, P["bench"])
     bench = prices[P["bench"]]
+    moves = big_moves(prices)
 
     idx = sector_index(prices, members)
     rs, ratio, mom, quad, heading = rrg(idx, bench, a.window)
@@ -240,8 +260,13 @@ def main():
     (1 + res).cumprod().to_csv(f"{a.out}/nav.csv")
     w[w.ne(w.shift())].dropna(how="all").to_csv(f"{a.out}/weights.csv")
     pd.concat([idx, bench.rename("BENCH")], axis=1).to_csv(f"{a.out}/sector_index.csv")
+    moves.to_csv(f"{a.out}/data_check_big_moves.csv", index=False)
 
-    pd.set_option("display.width", 160)
+    pd.set_option("display.width", 200)
+    pd.set_option("display.max_columns", None)
+    if len(moves):
+        print(f"ตรวจข้อมูล: {len(moves)} สัปดาห์ที่ราคาเปลี่ยนเกิน 50% (ดู {a.out}/data_check_big_moves.csv)")
+        print(moves.assign(date=moves.date.dt.date, ret=moves["return"].round(2)).drop(columns="return").to_string(index=False))
     print(f"\n== สถานะล่าสุด {ratio.index[-1].date()} (vs {P['bench']}, window {a.window}) ==")
     print(snap)
     print(f"\n== Backtest {res.index[1].date()} → {res.index[-1].date()} · top {a.top} · rebalance {a.rebalance}w · cost {a.cost}bps ==")

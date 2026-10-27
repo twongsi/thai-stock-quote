@@ -113,6 +113,15 @@ SHORT = {"^GSPC":"US","^STOXX50E":"EURO","^FTSE":"UK","^GDAXI":"DE","^FCHI":"FR"
   "^BVSP":"BR","^MXX":"MX","^J203.JO":"ZA","^JKSE":"ID","^KLSE":"MY","TDEX.BK":"TH","VNM":"VN","EPHE":"PH"}
 
 def world_preset(pid, name, members):
+    ok = {}
+    for sym, v in members.items():  # ตัวที่ดึงไม่ได้ (ราคาหรืออัตราแลกเปลี่ยน) ข้ามไป ไม่ให้ทั้งชุดล้ม
+        try:
+            fetch(sym, "1wk", "1mo")
+            if v[1] != "USD": fetch(f"{v[1]}=X", "1wk", "1mo")
+            ok[sym] = v
+        except Exception as e:
+            print("skip", sym, e, file=sys.stderr)
+    members = ok
     res = {}
     for interval, rng in (("1wk","5y"),("1d","2y")):
         bench, _ = fetch("ACWI", interval, rng); dates = sorted(bench)
@@ -138,12 +147,12 @@ def pack(rows, n):
 out=[]
 for p in PRESETS:
     syms=list(p["tickers"])
-    ok=[]
-    for s in syms:
-        try:
-            from fetch_prices import fetch; fetch(s,"1wk","1mo"); ok.append(s)
-        except Exception as e: print("skip",s,e,file=sys.stderr)
-    w,_=table(p["bench"],ok,"1wk","5y"); d,_=table(p["bench"],ok,"1d","2y")
+    w,mw=table(p["bench"],syms,"1wk","5y")
+    ok=[s for s in syms if s not in mw["skipped"]]
+    d,md=table(p["bench"],ok,"1d","2y")
+    if md["skipped"]:  # ให้รายการตรงกันทั้งรายสัปดาห์และรายวัน
+        ok=[s for s in ok if s not in md["skipped"]]
+        w,_=table(p["bench"],ok,"1wk","5y"); d,_=table(p["bench"],ok,"1d","2y")
     out.append({"id":p["id"],"name":p["name"],"bench":p["bench"],"symbols":ok,
                 "names":{s:p["tickers"][s] for s in ok},
                 "weekly":pack(w,len(ok)+1),"daily":pack(d,len(ok)+1)})

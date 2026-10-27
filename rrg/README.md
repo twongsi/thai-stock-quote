@@ -39,7 +39,7 @@ python sector_rotation.py --trend-filter --out results_trend
 | `build_page.py` | ฝัง `data.json` และสคริปต์ลง template → `docs/index.html` | – |
 | `sector_rotation.py` | workflow ครบ 7 ขั้น + backtest | `SET_SECTORS`, น้ำหนักใน `score()`, พารามิเตอร์ |
 | `WORKFLOW.md` | เอกสารสมการ, ผลทดสอบ, ข้อควรระวัง | – |
-| `tests/test_rrg.py` | unit test: ดัชนีหมวด, จตุภาค, backtest ไม่มองอนาคต (`pytest -q` ที่ราก repo) | – |
+| `tests/test_rrg.py` | unit test: ดัชนีหมวด, จตุภาค, backtest ไม่มองอนาคต, ค่าธรรมเนียม, การทำความสะอาดราคา (`pytest -q` ที่ราก repo) | – |
 | `../.github/workflows/rrg-weekly.yml` | อัปเดตข้อมูลอัตโนมัติทุกสัปดาห์ | เวลา cron |
 
 ## พารามิเตอร์ของ `sector_rotation.py`
@@ -51,7 +51,7 @@ python sector_rotation.py --trend-filter --out results_trend
 | `--rebalance` | 4 | จำนวนสัปดาห์ต่อรอบปรับพอร์ต |
 | `--cost` | 15 | ค่าธรรมเนียมรวม slippage ต่อข้าง (bps) |
 | `--trend-filter` | ปิด | ตัดหมวดที่ราคาอยู่ใต้เส้นเฉลี่ย 40 สัปดาห์ |
-| `--out` | results | โฟลเดอร์ผลลัพธ์: `snapshot.csv`, `metrics.csv`, `nav.csv`, `weights.csv`, `sector_index.csv` |
+| `--out` | results | โฟลเดอร์ผลลัพธ์: `snapshot.csv`, `metrics.csv`, `nav.csv`, `weights.csv`, `sector_index.csv`, `data_check_big_moves.csv` |
 
 ## รูปแบบ CSV สำหรับอัปโหลดในหน้าเว็บ
 
@@ -82,8 +82,8 @@ schedule ทำงานเฉพาะบน branch หลัก (`main`) จ�
 - **Benchmark ไทยใช้ TDEX.BK** (ETF อิง SET50) เพราะ Yahoo ไม่มีราคาย้อนหลังของ `^SET.BK`
 - **ดัชนีทั่วโลกแปลงเป็น USD** แล้วเทียบ ACWI ผลจึงรวมผลของค่าเงิน
 - **สูตร RS-Ratio / RS-Momentum เป็นสูตร z-score แบบเปิด** สูตร JdK ต้นฉบับไม่เปิดเผย ค่าจึงใกล้เคียงแต่ไม่เท่ากับ Bloomberg หรือ StockCharts
-- **Backtest มี survivorship bias** เพราะใช้รายชื่อหุ้นปัจจุบันย้อนหลัง ผลส่วนใหญ่มาจากหมวด ETRON ดู [WORKFLOW.md](WORKFLOW.md) ก่อนนำไปใช้
-- ราคาไทยจาก Yahoo มีจุดผิดพลาดเรื่องการแตกพาร์และการปรับราคา `analytics.py` ของ repo นี้มีฟังก์ชัน `clean_prices` สำหรับซ่อมแล้ว แต่โฟลเดอร์ `rrg/` ยังไม่ได้ใช้
+- **Backtest มี survivorship bias** เพราะใช้รายชื่อหุ้นปัจจุบันย้อนหลัง ผลส่วนใหญ่มาจากหมวด ETRON ตัด ETRON ออกแล้วแทบไม่ชนะ TDEX ดู [WORKFLOW.md](WORKFLOW.md) ก่อนนำไปใช้
+- ราคาไทยจาก Yahoo มีจุดผิดพลาด `sector_rotation.py` ตัดราคาที่กระโดดสัปดาห์เดียวด้วย `clean_prices` (วิธีเดียวกับ `analytics.py`) ส่วนการควบรวมที่ Yahoo ไม่ปรับ ต้องเพิ่มเองใน `fetch_prices.KNOWN_ADJUSTMENTS` ตรวจได้จาก `data_check_big_moves.csv` ที่สร้างทุกครั้งที่รัน
 - Yahoo Finance เป็นแหล่งข้อมูลไม่เป็นทางการ อาจเปลี่ยนรูปแบบหรือจำกัดการเรียกได้
 
 เพื่อการศึกษาและวิจัย ไม่ใช่คำแนะนำการลงทุน

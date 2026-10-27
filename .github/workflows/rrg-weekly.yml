@@ -51,11 +51,20 @@ jobs:
             git push || { git pull --rebase -X theirs && git push; }
           fi
 
-      # Publishes rrg/docs as the site when Settings → Pages → Source is "GitHub Actions";
-      # skipped quietly otherwise
       - uses: actions/upload-pages-artifact@v3
         with:
           path: rrg/docs
+
+  # Publishes rrg/docs as the site when Settings → Pages → Source is "GitHub Actions".
+  # A separate job, so a missing Pages setup or a branch the github-pages environment
+  # does not allow never blocks the data update above
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
       - id: deploy
         uses: actions/deploy-pages@v4
-        continue-on-error: true

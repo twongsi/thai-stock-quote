@@ -57,3 +57,41 @@ def test_backtest_uses_next_period_return():
     res, w, _ = sr.backtest(idx, p["B"], fwd, top=1, rebalance=1, cost_bps=0)
     r = idx.pct_change().fillna(0).loc[w.index]
     assert np.allclose(res["strategy"], (w.shift(1) * r).sum(axis=1))
+
+
+def test_backtest_charges_cost_per_side_including_first_buy():
+    p = _prices(60)
+    idx = p[["A1", "A2", "C1"]]
+    # score flips between A1 and A2 every period: each switch sells 100% and buys 100%
+    flip = pd.DataFrame(0.0, index=idx.index, columns=idx.columns)
+    flip.iloc[::2, 0] = 1.0
+    flip.iloc[1::2, 1] = 1.0
+    res0, w, _ = sr.backtest(idx, p["B"], flip, top=1, rebalance=1, cost_bps=0)
+    res1, _, to = sr.backtest(idx, p["B"], flip, top=1, rebalance=1, cost_bps=10)
+    drag = res0["strategy"] - res1["strategy"]
+    assert np.isclose(drag.iloc[1], 1.0 * 10 / 1e4)  # first buy from cash: 100% traded
+    assert np.allclose(drag.iloc[2:], 2.0 * 10 / 1e4)  # each switch: sell 100% + buy 100%
+    assert np.allclose(to.iloc[1:], 1.0)  # reported one-way turnover
+
+
+def test_clean_prices_removes_one_week_spike_only():
+    s = pd.DataFrame({"X": [10, 10.2, 10.1, 101.0, 10.3, 10.4, 10.2, 10.5, 10.6, 10.4]})
+    c = sr.clean_prices(s)
+    assert np.isnan(c["X"].iloc[3])
+    assert c["X"].drop(index=3).notna().all()
+
+
+def test_big_moves_lists_only_large_changes():
+    s = pd.DataFrame({"X": [10, 10.5, 20, 19.0], "Y": [5, 5.1, 5.0, 5.2]},
+                     index=pd.date_range("2024-01-05", periods=4, freq="W-FRI"))
+    m = sr.big_moves(s)
+    assert list(m["symbol"]) == ["X"] and np.isclose(m["return"].iloc[0], 20 / 10.5 - 1)
+
+
+def test_known_adjustment_removes_merger_jump():
+    import fetch_prices as fp
+    raw = {"2023-02-20": 5.10, "2023-02-27": 8.60, "2023-03-06": 8.15}
+    adj = fp.adjust("TRUE.BK", raw)
+    assert abs(adj["2023-02-27"] / adj["2023-02-20"] - 1) < 0.03
+    assert adj["2023-03-06"] == 8.15
+    assert fp.adjust("PTT.BK", raw) == raw
