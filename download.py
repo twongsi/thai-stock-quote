@@ -2,6 +2,8 @@
 
 Only new weeks are fetched when data/<TICKER>.csv already exists. The SET
 index (^SET.BK) and the TDEX SET50 ETF are saved to data/index/ as benchmarks.
+QQQ, SPY, the ABFTH Thai bond ETF and the USD/THB rate are saved to
+data/assets/ for the strategy sandbox's historical backtest.
 
     python download.py              # update everything
     python download.py PTT AOT      # update selected tickers
@@ -20,6 +22,10 @@ COLUMNS = ['High', 'Low', 'Open', 'Close', 'Volume', 'Adj Close']
 # Yahoo has almost no history for ^SET.BK; TDEX (an ETF tracking the SET50)
 # has prices back to 2007 and stands in as the long-run benchmark
 INDEX_SYMBOLS = {'SET': '^SET.BK', 'TDEX': 'TDEX.BK'}
+# Proxies for the other sleeves of docs/strategy-sandbox.html. Kept out of
+# data/index/ so analytics.py doesn't treat USD series as SET benchmarks.
+# USDTHB (THB per USD) converts QQQ and SPY returns into baht.
+ASSET_SYMBOLS = {'QQQ': 'QQQ', 'SPY': 'SPY', 'ABFTH': 'ABFTH.BK', 'USDTHB': 'THB=X'}
 
 
 def week_start(dates):
@@ -123,6 +129,7 @@ def main():
     failed = []
     jobs = [(t + '.BK', f'data/{t}.csv') for t in tickers]
     jobs += [(sym, f'data/index/{name}.csv') for name, sym in INDEX_SYMBOLS.items()]
+    jobs += [(sym, f'data/assets/{name}.csv') for name, sym in ASSET_SYMBOLS.items()]
     for symbol, path in jobs:
         try:
             n = update(symbol, path, args.full)

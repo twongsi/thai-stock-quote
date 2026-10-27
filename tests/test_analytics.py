@@ -68,3 +68,39 @@ def test_load_benchmarks_skips_short_series(tmp_path):
     short.to_csv(tmp_path / 'SET.csv', index=False)
     names = [s.name for s in a.load_benchmarks(str(tmp_path))]
     assert names == ['TDEX']
+
+
+def test_export_sandbox_data_aligns_and_converts_to_baht(tmp_path):
+    def write(rel, dates, close):
+        f = tmp_path / rel
+        f.parent.mkdir(exist_ok=True)
+        pd.DataFrame({'Date': dates, 'Close': close, 'Adj Close': close}).to_csv(f, index=False)
+
+    idx = weekly(80)
+    write('index/TDEX.csv', idx, 10 * 1.01 ** np.arange(80))
+    write('assets/QQQ.csv', idx[20:], 50 * 1.02 ** np.arange(60))      # starts later
+    write('assets/USDTHB.csv', idx, 30 * 1.001 ** np.arange(80))
+    write('assets/SPY.csv', idx[:1], [1.0])                             # too short, skipped
+    out = tmp_path / 'sandbox-data.js'
+    data = a.export_sandbox_data(str(out), str(tmp_path))
+
+    assert set(data['series']) == {'TDEX', 'QQQ', 'QQQ_THB'}
+    assert len(data['dates']) == 80 and data['asOf'] == data['dates'][-1]
+    assert data['series']['TDEX'][0] == 100
+    qqq, thb = data['series']['QQQ'], data['series']['QQQ_THB']
+    assert qqq[:20] == [None] * 20 and qqq[20] == 100
+    # baht return = USD return x currency return
+    assert np.isclose(thb[-1] / thb[20], (qqq[-1] / qqq[20]) * 1.001 ** 59, rtol=1e-4)
+    assert out.read_text().splitlines()[1].startswith('window.SANDBOX_DATA = {')
+
+
+def test_export_sandbox_data_drops_odd_lot_print_in_bond_etf(tmp_path):
+    idx = weekly(60)
+    for rel, close in [('index/TDEX.csv', np.full(60, 10.0)), ('assets/ABFTH.csv', np.full(60, 1300.0))]:
+        f = tmp_path / rel
+        f.parent.mkdir(exist_ok=True)
+        if 'ABFTH' in rel:
+            close[30] = 950.0                      # one thin trade 27% below, back the next week
+        pd.DataFrame({'Date': idx, 'Close': close, 'Adj Close': close}).to_csv(f, index=False)
+    data = a.export_sandbox_data(str(tmp_path / 'out.js'), str(tmp_path))
+    assert np.allclose(data['series']['ABFTH'], 100)
