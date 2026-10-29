@@ -746,7 +746,7 @@ SWC,mai,S,INDUS,,company
 SYMC,SET,S,TECH,ICT,company
 SYNEX,SET,S,TECH,ICT,company
 SYNTEC,SET,S,PROPCON,CONS,company
-TACC,mai,S,AGRO,,company
+TACC,SET,S,AGRO,FOOD,company
 TAE,SET,S,RESOURC,ENERG,company
 TAKUNI,mai,S,RESOURC,,company
 TAN,SET,S,SERVICE,COMM,company
