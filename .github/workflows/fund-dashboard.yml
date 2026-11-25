@@ -136,7 +136,14 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment_retry.outputs.page_url }}
     steps:
       - id: deployment
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+
+      # Pages can return a transient HTTP 500 when creating the deployment.
+      # Retry the same built artifact once; a second failure still fails the job.
+      - id: deployment_retry
+        if: steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v4
