@@ -148,12 +148,13 @@ class SecClient:
                 result = subprocess.run([self.bridge], input=json.dumps(request), capture_output=True,
                                         text=True, timeout=self.timeout + 5, env=env, check=True)
                 response = json.loads(result.stdout)
-                if response.get("transport_error"):
-                    raise urllib.error.URLError("sec-go transport failed")
-                return (int(response["status"]), response.get("content_type", ""),
-                        response.get("body", "").encode(), response.get("retry_after", ""))
+                transport_result = (int(response["status"]), response.get("content_type", ""),
+                                    response.get("body", "").encode(), response.get("retry_after", ""))
             except (OSError, subprocess.SubprocessError, ValueError, KeyError) as exc:
                 raise SecApiError("sec-bridge ทำงานไม่สำเร็จ (ไม่แสดง stderr เพื่อป้องกันข้อมูลลับ)") from exc
+            if response.get("transport_error"):
+                raise urllib.error.URLError("sec-go transport failed")
+            return transport_result
         query = urllib.parse.urlencode(
             {k: v for k, v in params.items() if v not in (None, "")}, safe=","
         )

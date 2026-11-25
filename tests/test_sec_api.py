@@ -127,3 +127,20 @@ def test_reject_wrong_binary_revision(monkeypatch):
     monkeypatch.setattr(sec_api.subprocess, "run", lambda *a, **kw: SimpleNamespace(stdout='{"module":"wrong","version":"latest"}'))
     with pytest.raises(SecApiError, match="ไม่ตรง"):
         SecClient(api_key="fixture-secret", backend="sec-go")
+
+
+def test_go_network_failure_is_retried_without_exposing_error(monkeypatch):
+    from types import SimpleNamespace
+    lock = json.loads((Path(__file__).resolve().parents[1] / "tools/sec-bridge/sec-go.lock.json").read_text())
+    responses = [
+        {"status": 0, "transport_error": True},
+        {"status": 200, "content_type": "application/json", "body": '{"items":[],"next_cursor":""}'},
+    ]
+    def run(args, **kwargs):
+        data = lock if "--version" in args else responses.pop(0)
+        return SimpleNamespace(stdout=json.dumps(data))
+    monkeypatch.setattr(sec_api.subprocess, "run", run)
+    monkeypatch.setattr(sec_api.time, "sleep", lambda _: None)
+    client = SecClient(api_key="fixture-secret", backend="sec-go", use_cache=False, min_interval=0)
+    assert client.fetch_all(ENDPOINTS["nav"]) == []
+    assert not responses

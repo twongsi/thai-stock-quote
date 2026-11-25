@@ -8,7 +8,7 @@ from sec_api import ENDPOINTS, SecApiError, SecClient
 
 def main() -> int:
     try:
-        client = SecClient(use_cache=False)
+        client = SecClient(use_cache=False, timeout=20, max_retries=2)
     except SecApiError as exc:
         print(str(exc))
         return 1
