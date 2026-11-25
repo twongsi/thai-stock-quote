@@ -68,3 +68,13 @@ def test_missing_nav_cannot_build_as_real():
             return super().fetch_all(path, params, **kwargs)
     with pytest.raises(SecApiError, match="NAV|หน่วยลงทุน"):
         fund_service.build_fund_bundle(EmptyNAV(), "SCBNDQ(A)")
+
+
+def test_legacy_project_search_still_requires_exact_share_class():
+    class Client:
+        def fetch_all(self, path, params, **kwargs):
+            if params["project_info"] == "KF-GBRAND":
+                return [{"proj_id": "M0317_2559", "proj_abbr_name": "KF-GBRAND",
+                         "fund_class_name": "KFGBRAND-A", "fund_status": "Registered"}]
+            return []
+    assert fund_service.resolve_fund(Client(), "KFGBRAND-A")["matched_class"] == "KFGBRAND-A"

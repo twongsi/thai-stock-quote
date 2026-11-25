@@ -75,7 +75,8 @@ pagination ต้องอ่านครบ หยุดพร้อม error �
 ถ้าไม่มี key, NAV ว่าง หรือกองใด build ไม่สำเร็จ จะไม่ deploy ทับเว็บเดิม
 เลือกข้อมูลจำลองได้เฉพาะ manual workflow input `demo=true`; ข้อมูลจะมี `demo=true`
 การรัน branch `codex/unified-quotes-pinned-sec-go` ใช้สำหรับตรวจด้วย secret ของ repository
-แต่จะไม่ deploy Pages; เฉพาะ `main` เท่านั้นที่ deploy ได้
+แต่จะไม่ deploy Pages และใช้ประวัติ 1 ปีโดยปริยายเพื่อลดการเรียก API ระหว่างตรวจแก้
+เฉพาะ `main` เท่านั้นที่ deploy ได้และใช้ประวัติ 5 ปีโดยปริยาย; manual input `years` กำหนดเองได้
 
 การทดสอบ offline ผ่านไม่ได้ยืนยันว่า SEC key หรือข้อมูลจริงใช้งานได้ ต้องตรวจ log ของ live workflow
 และวันที่ NAV หลัง merge ก่อนถือว่าพร้อมใช้งาน
@@ -90,6 +91,19 @@ python3 fund_dashboard/selftest.py --demo
 เมื่อ build binary แล้ว tests จะใช้ local HTTP server ทดสอบทั้ง Python และ Go
 ครอบคลุม HTTP 204, HTML, body ว่าง, auth errors, retry, pagination, cache และ revision lock
 CI มี job แยกสำหรับ build/test Go bridge และทดสอบทั้งสอง transport
+
+## ตรวจรหัสใน watchlist
+
+แก้ตัวอย่างเดิมตามเว็บไซต์ บลจ. (ตรวจ 25 พฤศจิกายน 2569):
+
+| เดิม | ใช้ใน watchlist | แหล่งตรวจสอบ |
+|---|---|---|
+| K-ATECH-A(A) | K-ATECH | https://www.kasikornasset.com/kasset/TH/mutual-fund/fund-template/Pages/K-ATECH.aspx |
+| SCBSET50(A) | SCBSET50 | https://www.scbam.com/fund/interesting-fund/fund-information/scbset50 |
+| TMBGOLDS | ES-GOLDS | https://www.eastspring.co.th/funds/funds-search |
+| KFGBRAND-A | คง KFGBRAND-A; ค้นชื่อโครงการเดิม KF-GBRAND เพิ่ม | https://www.krungsriasset.com/TH/News/Fund-Announcement/11955/ |
+
+การค้นด้วยชื่อเดิมเป็นเพียง search hint ระบบยังต้องตรวจรหัสชนิดหน่วยลงทุนให้ตรงก่อนใช้ NAV
 
 ## License
 

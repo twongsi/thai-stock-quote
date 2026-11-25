@@ -17,6 +17,11 @@ import metrics
 from sec_api import ENDPOINTS, SecApiError
 
 ACTIVE_STATUS = {"REGISTERED", "IPO"}
+# Search hints only: the returned fund/class must still match the requested code.
+# SEC may index the original project name after an AMC renames its share classes.
+# https://www.krungsriasset.com/TH/News/Fund-Announcement/11955/
+# https://market.sec.or.th/public/mrap/MRAPView.aspx?FTYPE=M&PID=0317&PYR=2559
+FUND_SEARCH_HINTS = {"KFGBRAND-A": ["KF-GBRAND", "M0317_2559"]}
 TOTAL_FEE_KEYWORDS = ("รวมค่าใช้จ่าย", "ค่าใช้จ่ายรวม", "ค่าธรรมเนียมทั้งหมด", "รวมทั้งสิ้น", "total expense")
 DEFAULT_HISTORY_YEARS = int(os.environ.get("SEC_HISTORY_YEARS", "5"))
 
@@ -186,6 +191,7 @@ def resolve_fund(client, code: str, active_only: bool = True) -> dict:
         candidates = [base]
         if "-" in base:
             candidates.append(base.rsplit("-", 1)[0])
+        candidates.extend(FUND_SEARCH_HINTS.get(_norm(code), []))
         for query in dict.fromkeys(candidates):
             if query and query != code:
                 results = search_funds(client, query, limit=100, active_only=False)

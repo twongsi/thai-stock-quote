@@ -92,7 +92,7 @@ jobs:
         working-directory: fund_dashboard
         env:
           SEC_API_KEY: ${{ secrets.SEC_API_KEY }}
-          SEC_HISTORY_YEARS: ${{ github.event.inputs.years || '5' }}
+          SEC_HISTORY_YEARS: ${{ inputs.years || (github.ref == 'refs/heads/main' && '5' || '1') }}
           SEC_DEMO: ${{ inputs.demo || false }}
         run: |
           if [ "${SEC_DEMO}" = "true" ]; then
