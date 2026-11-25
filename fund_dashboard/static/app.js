@@ -433,8 +433,10 @@ function rangePoints(history, range) {
   if (!days) return history;
   const last = toDate(history[history.length - 1].d);
   const cut = new Date(last.getTime() - days * 86400000);
-  const sliced = history.filter((row) => toDate(row.d) >= cut);
-  return sliced.length > 1 ? sliced : history;
+  // Use the last NAV on or before the boundary, like metrics.slice_since.
+  let start = 0;
+  history.forEach((row, index) => { if (toDate(row.d) <= cut) start = index; });
+  return history.slice(start);
 }
 
 function renderChart() {
@@ -706,6 +708,7 @@ function renderFeesAndTerms() {
     <div class="kv"><span class="k">วันทำการขายคืน</span><span class="v" style="font-family:var(--font)">${esc(sub.redemption_period || '—')}</span></div>
     <div class="kv"><span class="k">ระยะเวลารับเงินค่าขายคืน</span><span class="v">${esc(sub.settlement_period || '—')}</span></div>
     <div class="kv"><span class="k">นโยบายปันผล</span><span class="v" style="font-family:var(--font)">${esc(bundle.dividend_policy.label || '—')}</span></div>
+    ${bundle.dividend_history_note ? `<div class="sub">${esc(bundle.dividend_history_note)}</div>` : ''}
     ${dividends.length ? `<div class="sub" style="margin:12px 0 4px">ปันผลล่าสุด</div>
       <div class="table-scroll"><table><thead><tr><th>วันจ่าย</th><th class="num">บาท/หน่วย</th></tr></thead>
       <tbody>${dividends.slice(0, 5).map((d) => `<tr><td>${thaiDate(d.dividend_date || d.book_close_date)}</td><td class="num">${num(d.value, 4)}</td></tr>`).join('')}</tbody></table></div>` : ''}`;

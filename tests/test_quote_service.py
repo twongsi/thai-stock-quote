@@ -81,3 +81,30 @@ def test_current_renamed_fund_requires_exact_share_class():
     assert fund_service.resolve_fund(Client(), "KF-QUALITY-A")["matched_class"] == "KF-QUALITY-A"
     with pytest.raises(SecApiError):
         fund_service.resolve_fund(Client(), "KFGBRAND-A")
+
+
+def test_fund_bundle_does_not_mix_class_dividends_fees_or_links():
+    class MixedClient(DemoClient):
+        def fetch_all(self, path, params=None, **kwargs):
+            if path == ENDPOINTS['dividend_history']:
+                return [{'fund_class_name': 'SCBNDQ(P)', 'dividend_value': 99},
+                        {'dividend_value': 88}]
+            if path == ENDPOINTS['factsheet_urls']:
+                return [{'fund_class_name': 'SCBNDQ(P)', 'amc_url_factsheet': 'wrong-class'},
+                        {'pdf_factsheet': 'project-pdf', 'amc_url_factsheet': 'unclassified'},
+                        {'fund_class_name': 'SCBNDQ(A)', 'amc_url_factsheet': 'correct-class'}]
+            if path == ENDPOINTS['mutual_fund_fees']:
+                return [{'fund_class_name': 'SCBNDQ(P)', 'rate': 99},
+                        {'fund_class_name': 'SCBNDQ(A)', 'rate': 1}]
+            return super().fetch_all(path, params, **kwargs)
+    b = fund_service.build_fund_bundle(MixedClient(), 'SCBNDQ(A)')
+    assert b['dividend_history'] == []
+    assert b['dividend_history_note']
+    assert [r['rate'] for r in b['amc_fees']] == [1]
+    assert [r['amc_url'] for r in b['factsheet_urls']] == [None, 'correct-class']
+
+
+def test_class_specific_dividends_are_retained():
+    rows = [{'fund_class_name': 'A', 'dividend_value': 1},
+            {'fund_class_name': 'D', 'dividend_value': 2}, {'dividend_value': 3}]
+    assert fund_service._class_rows(rows, 'D', False) == [rows[1]]

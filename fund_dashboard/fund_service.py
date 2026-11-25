@@ -219,12 +219,19 @@ def resolve_fund(client, code: str, active_only: bool = True) -> dict:
 
 
 # ---------------------------------------------------------------- building blocks
+def _class_rows(rows: list[dict], chosen: str | None, allow_unclassified: bool = True) -> list[dict]:
+    """Never attach another share class's factsheet or distribution to this class."""
+    return [r for r in rows if _norm(r.get("fund_class_name")) == _norm(chosen)
+            or (allow_unclassified and not r.get("fund_class_name"))]
+
+
 def _latest(client, key: str, proj_id: str, extra: dict | None = None) -> list[dict]:
     """ดึง factsheet ฉบับล่าสุดของกองทุน (latest=true) แบบไม่ให้ error ทำให้ทั้งหน้าพัง"""
     params = {"proj_id": proj_id, "latest": "true"}
     params.update(extra or {})
     try:
-        return client.fetch_all(ENDPOINTS[key], params, max_pages=5)
+        rows = client.fetch_all(ENDPOINTS[key], params, max_pages=5)
+        return _class_rows(rows, extra["fund_class_name"]) if extra and extra.get("fund_class_name") else rows
     except SecApiError:
         return []
 
@@ -363,6 +370,18 @@ def build_fund_bundle(
     except SecApiError:
         specifications = []
 
+    multi_class = len({r.get("fund_class_name") for r in profile_rows if r.get("fund_class_name")}) > 1
+    class_dividends = _class_rows(dividend_history, chosen_class, allow_unclassified=not multi_class)
+    dividend_note = ("ไม่แสดงรายการปันผลระดับโครงการที่ไม่ระบุชนิดหน่วยลงทุน เพื่อป้องกันการปะปนกับชนิดอื่น"
+                     if multi_class and any(not r.get("fund_class_name") for r in dividend_history) else "")
+    dividend_history = class_dividends
+    amc_fees = _class_rows(amc_fees, chosen_class, allow_unclassified=not multi_class)
+    urls = _class_rows(urls, chosen_class)
+    if multi_class:
+        # An unclassified AMC link may point to a different class (e.g. SCBNDQ(P)).
+        # Keep the SEC project PDF, but do not guess which AMC class URL to display.
+        urls = [dict(r, amc_url_factsheet=None) if not r.get("fund_class_name") else r for r in urls]
+
     stat = statistics[0] if statistics else {}
     spectrum = risk_spectrum[0] if risk_spectrum else {}
     spectrum_code = str(spectrum.get("risk_spectrum") or "").upper()
@@ -477,6 +496,7 @@ def build_fund_bundle(
             "flag": (dividend[0].get("dividend_policy") if dividend else ""),
             "label": POLICY_LABEL.get(str(dividend[0].get("dividend_policy") or "").upper(), "") if dividend else "",
         },
+        "dividend_history_note": dividend_note,
         "dividend_history": [
             {
                 "book_close_date": str(r.get("book_close_date") or "")[:10],
