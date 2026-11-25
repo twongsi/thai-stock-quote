@@ -87,7 +87,11 @@ def build(client, codes: list[str], out_dir: Path, years: int, risk_free: float,
     for name in ("styles.css", "app.js"):
         shutil.copy2(STATIC_SRC / name, out_dir / name)
     # ติดธงไว้ว่าเป็นเว็บ static หน้าเว็บจะได้อ่าน data/*.json ตรง ๆ โดยไม่ต้องลองเรียก /api ก่อน
-    html = (STATIC_SRC / "index.html").read_text(encoding="utf-8").replace("<body>", '<body data-mode="static">', 1)
+    revision = str(time.time_ns())
+    html = (STATIC_SRC / "index.html").read_text(encoding="utf-8").replace(
+        "<body>", f'<body data-mode="static" data-build="{revision}">', 1)
+    html = html.replace('href="styles.css"', f'href="styles.css?v={revision}"')
+    html = html.replace('src="app.js"', f'src="app.js?v={revision}"')
     (out_dir / "index.html").write_text(html, encoding="utf-8")
     (out_dir / ".nojekyll").write_text("", encoding="utf-8")   # กัน GitHub Pages ข้ามไฟล์ที่ขึ้นต้นด้วย _
 

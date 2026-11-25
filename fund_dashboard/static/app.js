@@ -79,7 +79,11 @@ const state = {
    - static : เว็บที่ build ไว้ล่วงหน้า เช่นบน GitHub Pages -> อ่าน data/*.json ที่ GitHub Actions สร้างไว้ */
 const STATIC = { enabled: false, meta: null, index: [], bundles: new Map() };
 
-const assetUrl = (path) => new URL(String(path).replace(/^\//, ''), document.baseURI);
+const assetUrl = (path) => {
+  const url = new URL(String(path).replace(/^\//, ''), document.baseURI);
+  if (document.body.dataset.build) url.searchParams.set('v', document.body.dataset.build);
+  return url;
+};
 
 async function fetchJson(path) {
   const res = await fetch(assetUrl(path));

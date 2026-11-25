@@ -108,3 +108,13 @@ def test_class_specific_dividends_are_retained():
     rows = [{'fund_class_name': 'A', 'dividend_value': 1},
             {'fund_class_name': 'D', 'dividend_value': 2}, {'dividend_value': 3}]
     assert fund_service._class_rows(rows, 'D', False) == [rows[1]]
+
+
+def test_static_build_versions_assets_and_json_generation(tmp_path):
+    import build_static
+    import re
+    assert build_static.build(DemoClient(), ['SCBNDQ(A)'], tmp_path, 1, 0.02, True) == 0
+    html = (tmp_path / 'index.html').read_text()
+    revision = re.search(r'data-build="(\d+)"', html).group(1)
+    assert f'app.js?v={revision}' in html
+    assert f'styles.css?v={revision}' in html

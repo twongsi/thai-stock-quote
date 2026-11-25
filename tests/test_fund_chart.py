@@ -19,3 +19,14 @@ def test_chart_keeps_nav_before_weekend_boundary():
     code += function + '\nconsole.log(JSON.stringify(rangePoints(' + json.dumps(rows) + ", '1Y')));"
     result = subprocess.run(['node', '-e', code], capture_output=True, text=True, check=True)
     assert json.loads(result.stdout) == rows
+
+
+def test_data_urls_use_build_version_without_changing_subpath():
+    if not shutil.which('node'):
+        pytest.skip('Node is required for browser URL regression')
+    source = (Path(__file__).resolve().parents[1] / 'fund_dashboard/static/app.js').read_text()
+    function = re.search(r'const assetUrl = \(path\) => \{.*?\n\};', source, re.S).group()
+    code = "const document={baseURI:'https://example.test/project/fund/',body:{dataset:{build:'123'}}};\n"
+    code += function + "\nconsole.log(assetUrl('data/meta.json').href);"
+    result = subprocess.run(['node', '-e', code], capture_output=True, text=True, check=True)
+    assert result.stdout.strip() == 'https://example.test/project/fund/data/meta.json?v=123'
