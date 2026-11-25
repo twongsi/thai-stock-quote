@@ -103,6 +103,7 @@ jobs:
               exit 1
             fi
             python3 probe_sec.py
+            python3 probe_sec.py --discover
             python3 build_static.py --out ../site/fund --years "${SEC_HISTORY_YEARS}"
           fi
 
