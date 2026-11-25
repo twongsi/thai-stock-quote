@@ -70,11 +70,14 @@ def test_missing_nav_cannot_build_as_real():
         fund_service.build_fund_bundle(EmptyNAV(), "SCBNDQ(A)")
 
 
-def test_legacy_project_search_still_requires_exact_share_class():
+def test_current_renamed_fund_requires_exact_share_class():
     class Client:
         def fetch_all(self, path, params, **kwargs):
-            if params["project_info"] == "KF-GBRAND":
-                return [{"proj_id": "M0317_2559", "proj_abbr_name": "KF-GBRAND",
-                         "fund_class_name": "KFGBRAND-A", "fund_status": "Registered"}]
+            if params["project_info"] == "KF-QUALITY":
+                return [{"proj_id": "M0317_2559", "proj_abbr_name": "KF-QUALITY",
+                         "fund_class_name": c, "fund_status": "Registered"}
+                        for c in ("KF-QUALITY-D", "KF-QUALITY-A")]
             return []
-    assert fund_service.resolve_fund(Client(), "KFGBRAND-A")["matched_class"] == "KFGBRAND-A"
+    assert fund_service.resolve_fund(Client(), "KF-QUALITY-A")["matched_class"] == "KF-QUALITY-A"
+    with pytest.raises(SecApiError):
+        fund_service.resolve_fund(Client(), "KFGBRAND-A")

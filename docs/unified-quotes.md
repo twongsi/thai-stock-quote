@@ -101,9 +101,12 @@ CI มี job แยกสำหรับ build/test Go bridge และทด�
 | K-ATECH-A(A) | K-ATECH | https://www.kasikornasset.com/kasset/TH/mutual-fund/fund-template/Pages/K-ATECH.aspx |
 | SCBSET50(A) | SCBSET50 | https://www.scbam.com/fund/interesting-fund/fund-information/scbset50 |
 | TMBGOLDS | ES-GOLDS | https://www.eastspring.co.th/funds/funds-search |
-| KFGBRAND-A | คง KFGBRAND-A; ค้นชื่อโครงการเดิม KF-GBRAND เพิ่ม | https://www.krungsriasset.com/TH/News/Fund-Announcement/11955/ |
+| KFGBRAND-A | KF-QUALITY-A | https://www.krungsriasset.com/TH/News/Promotion/global-quality-growth-fund-kf-quality/ |
 
-การค้นด้วยชื่อเดิมเป็นเพียง search hint ระบบยังต้องตรวจรหัสชนิดหน่วยลงทุนให้ตรงก่อนใช้ NAV
+KFGBRAND-A เปลี่ยนเป็น KF-QUALITY-A ตั้งแต่ 28 ตุลาคม 2569 และเปลี่ยนกองทุนหลักด้วย
+SEC ยืนยันโครงการเดิม `M0317_2559` และชนิดสะสมมูลค่า `KF-QUALITY-A`
+ระบบใช้รหัสปัจจุบันอย่างชัดเจน ไม่แปลงชื่อเดิมอัตโนมัติหรือรวม NAV ของ class อื่น
+ประวัติที่คร่อมวันเปลี่ยนกองทุนหลักไม่ควรตีความว่าเป็นกลยุทธ์เดียวกันตลอดช่วง
 
 ## License
 

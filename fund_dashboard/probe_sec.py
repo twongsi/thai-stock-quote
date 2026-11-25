@@ -18,7 +18,7 @@ def main() -> int:
         return 1
     failed = False
     if args.discover:
-        for query in ("K-ATECH", "SCBSET50", "KFGBRAND", "KF-GBRAND", "M0317_2559", "ES-GOLDS"):
+        for query in ("K-ATECH", "SCBSET50", "KF-QUALITY", "M0317_2559", "ES-GOLDS"):
             try:
                 page = client.get(ENDPOINTS["profiles"], {"project_info": query, "page_size": 100})
                 identifiers = [{k: row.get(k) for k in ("proj_id", "proj_abbr_name", "fund_class_name", "fund_status")}
