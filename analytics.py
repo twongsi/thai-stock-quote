@@ -307,7 +307,7 @@ def summarize(returns, rf=0.02):
         years = len(r) / WEEKS_PER_YEAR
         cagr = nav.iloc[-1] ** (1 / years) - 1
         vol = r.std() * np.sqrt(WEEKS_PER_YEAR)
-        rows[col] = {'CAGR': cagr, 'Volatility': vol, 'Sharpe': (cagr - rf) / vol,
+        rows[col] = {'CAGR': cagr, 'Volatility': vol, 'Sharpe': (cagr - rf) / vol if vol > 0 else np.nan,
                      'MaxDrawdown': max_drawdown(nav), 'Weeks': len(r)}
     return pd.DataFrame(rows).T
 

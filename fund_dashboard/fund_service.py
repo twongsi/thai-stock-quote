@@ -192,7 +192,7 @@ def resolve_fund(client, code: str, active_only: bool = True) -> dict:
                 if results:
                     break
     if not results:
-        raise SecApiError(f"ไม่พบกองทุนที่ตรงกับ '{code}' — ลองใส่ชื่อย่อ เช่น K-ATECH หรือ SCBNDQ")
+        raise SecApiError(f"ไม่พบกองทุนที่ตรงกับ '{code}' — ลองใส่ชื่อย่อ เช่น K-ATECH หรือ SCBNDQ", 404)
 
     needle = _norm(code)
     best = None
@@ -208,7 +208,7 @@ def resolve_fund(client, code: str, active_only: bool = True) -> dict:
         if matched_class:
             break
     if best is None:
-        raise SecApiError(f"ไม่พบรหัสกองทุนหรือชนิดหน่วยลงทุนที่ตรงกับ '{code}' — โปรดเลือกรหัสจากผลค้นหา")
+        raise SecApiError(f"ไม่พบรหัสกองทุนหรือชนิดหน่วยลงทุนที่ตรงกับ '{code}' — โปรดเลือกรหัสจากผลค้นหา", 404)
     if matched_class is None:
         for class_name in best["classes"]:
             if _norm(class_name) == needle:
@@ -257,7 +257,7 @@ def _pick_class(profile_rows: list[dict], nav_rows: list[dict], preferred: str |
         for name in classes:
             if _norm(name) == _norm(preferred):
                 return name, classes
-        raise SecApiError(f"ไม่พบชนิดหน่วยลงทุน '{preferred}' ของกองทุนนี้")
+        raise SecApiError(f"ไม่พบชนิดหน่วยลงทุน '{preferred}' ของกองทุนนี้", 404)
     if nav_classes:
         latest = max(nav_rows, key=lambda row: str(row.get("nav_date") or ""))
         return latest.get("fund_class_name") or None, classes

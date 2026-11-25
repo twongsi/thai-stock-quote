@@ -69,6 +69,16 @@ def cached(key: tuple, builder):
 
 
 # ---------------------------------------------------------------- API handlers
+def integer_param(params: dict, name: str, default: int, maximum: int) -> int:
+    try:
+        value = int(params.get(name) or default)
+        if not 1 <= value <= maximum:
+            raise ValueError
+    except (TypeError, ValueError) as exc:
+        raise SecApiError(f"{name} ต้องเป็นจำนวนเต็มระหว่าง 1–{maximum}", 400) from exc
+    return value
+
+
 def api_meta(_: dict) -> dict:
     cat = catalog_mod.load_catalog()
     peers = catalog_mod.load_peers()
@@ -84,7 +94,7 @@ def api_meta(_: dict) -> dict:
 
 def api_search(params: dict) -> dict:
     query = (params.get("q") or "").strip()
-    limit = min(int(params.get("limit") or 12), 50)
+    limit = integer_param(params, "limit", 12, 50)
     if len(query) < 2:
         return {"results": []}
     cat = catalog_mod.load_catalog()
@@ -96,7 +106,7 @@ def api_search(params: dict) -> dict:
 def api_funds(params: dict) -> dict:
     """รายชื่อกองทุนสำหรับหน้า browse (ต้องรัน catalog.py --build ก่อนถึงจะครบทุกกอง)"""
     cat = catalog_mod.load_catalog()
-    limit = min(int(params.get("limit") or 300), 2000)
+    limit = integer_param(params, "limit", 300, 2000)
     query = (params.get("q") or "").strip()
     amc = (params.get("amc") or "").strip()
     policy = (params.get("policy") or "").strip()
@@ -130,7 +140,7 @@ def api_fund(params: dict) -> dict:
     if not code:
         raise SecApiError("ต้องระบุรหัสกองทุน เช่น /api/fund?code=K-ATECH")
     class_name = (params.get("class") or "").strip() or None
-    years = max(1, min(int(params.get("years") or fund_service.DEFAULT_HISTORY_YEARS), 20))
+    years = integer_param(params, "years", fund_service.DEFAULT_HISTORY_YEARS, 20)
 
     def build():
         bundle = fund_service.build_fund_bundle(
@@ -148,7 +158,7 @@ def api_compare(params: dict) -> dict:
     if not codes:
         return {"funds": [], "errors": [], "window": params.get("window", "1Y")}
     window = (params.get("window") or "1Y").upper()
-    years = max(1, min(int(params.get("years") or fund_service.DEFAULT_HISTORY_YEARS), 20))
+    years = integer_param(params, "years", fund_service.DEFAULT_HISTORY_YEARS, 20)
 
     def build():
         return fund_service.build_comparison(
@@ -197,17 +207,17 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 self._json(200, ROUTES[path](params))
             except SecApiError as exc:
-                status = (exc.status if exc.status in (400, 404) else 502) if path in ("/api/quote", "/api/history") else 200
+                status = (exc.status if exc.status in (400, 404) else 502) if path in ("/api/quote", "/api/history") else (400 if exc.status == 400 else 200)
                 self._json(status, {"error": str(exc), "status": exc.status})
             except Exception as exc:  # noqa: BLE001
                 traceback.print_exc()
-                self._json(500, {"error": f"เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์: {exc}"})
+                self._json(500, {"error": "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์ — ตรวจสอบ server log"})
             return
 
         # ---- static files ----
         rel = "index.html" if path in ("/", "") else path.lstrip("/")
         target = (STATIC_DIR / rel).resolve()
-        if not str(target).startswith(str(STATIC_DIR.resolve())) or not target.is_file():
+        if not target.is_relative_to(STATIC_DIR.resolve()) or not target.is_file():
             self._send(404, b"not found", "text/plain; charset=utf-8")
             return
         ctype = mimetypes.guess_type(str(target))[0] or "application/octet-stream"

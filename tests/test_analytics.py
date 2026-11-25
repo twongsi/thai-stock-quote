@@ -114,3 +114,12 @@ def test_metrics_skips_stock_with_exactly_one_year_of_weeks():
     m = a.metrics(prices, close=prices)
     assert list(m.index) == ['OLD']
     assert np.isclose(m.loc['OLD', 'Return1Y'], 1.01 ** 52 - 1)
+
+
+def test_summarize_zero_volatility_has_no_infinite_sharpe():
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter('error', RuntimeWarning)
+        result = a.summarize(pd.DataFrame({'Flat': np.zeros(60)}, index=weekly(60)))
+    assert result.loc['Flat', 'Volatility'] == 0
+    assert np.isnan(result.loc['Flat', 'Sharpe'])
