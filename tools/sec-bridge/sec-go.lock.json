@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/twongsi/sec-go",
+  "module": "github.com/twongsi/sec-go",
+  "upstream_module": "github.com/jwitmann/sec-go",
+  "version": "v0.0.0-20260713122606-50360dba6ec8",
+  "commit": "50360dba6ec87f74ae82a59541d1b57537ae545a",
+  "license": "MIT"
+}

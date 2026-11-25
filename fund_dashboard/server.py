@@ -26,18 +26,23 @@ from pathlib import Path
 import catalog as catalog_mod
 import fund_service
 import metrics
+import quote_service
 from sec_api import SecApiError, SecClient, load_dotenv
 
 ROOT = Path(__file__).resolve().parent
 STATIC_DIR = ROOT / "static"
 
 _state: dict = {"client": None, "demo": False}
+_client_lock = threading.Lock()
 _bundle_cache: dict[tuple, tuple[float, dict]] = {}
 _bundle_lock = threading.Lock()
 BUNDLE_TTL = 900  # วินาที
 
 
 def get_client():
+    with _client_lock:
+        if _state["client"] is None:
+            _state["client"] = SecClient(use_cache=not _state.get("no_cache", False))
     return _state["client"]
 
 
@@ -154,6 +159,8 @@ def api_compare(params: dict) -> dict:
 
 
 ROUTES = {
+    "/api/quote": lambda params: quote_service.get_quote(params, get_client, _state["demo"]),
+    "/api/history": lambda params: quote_service.get_history(params, get_client, _state["demo"]),
     "/api/meta": api_meta,
     "/api/search": api_search,
     "/api/funds": api_funds,
@@ -190,7 +197,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 self._json(200, ROUTES[path](params))
             except SecApiError as exc:
-                self._json(200, {"error": str(exc), "status": exc.status})
+                status = (exc.status if exc.status in (400, 404) else 502) if path in ("/api/quote", "/api/history") else 200
+                self._json(status, {"error": str(exc), "status": exc.status})
             except Exception as exc:  # noqa: BLE001
                 traceback.print_exc()
                 self._json(500, {"error": f"เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์: {exc}"})
@@ -226,12 +234,8 @@ def main() -> None:
         _state["demo"] = True
         print("⚠️  โหมดสาธิต: ข้อมูลทั้งหมดเป็นข้อมูลจำลอง ไม่ใช่ข้อมูลจริงของกองทุน")
     else:
-        try:
-            _state["client"] = SecClient(use_cache=not args.no_cache)
-        except SecApiError as exc:
-            print(f"\n{exc}\n")
-            print("หรือลองดูหน้าตา dashboard ก่อนด้วยข้อมูลจำลอง:  python3 server.py --demo")
-            raise SystemExit(1)
+        # Stock queries do not require a SEC key; initialize the fund client on demand.
+        _state["no_cache"] = args.no_cache
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Thai Fund Dashboard → http://{args.host}:{args.port}  (กด Ctrl+C เพื่อหยุด)")

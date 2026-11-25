@@ -1,5 +1,12 @@
 # thai-stock-quote
 
+## Unified stock quotes and fund NAV
+
+The local server now exposes `/api/quote` and `/api/history` for both stocks and funds.
+SEC requests can use the Python client or the **pinned `twongsi/sec-go` fork** through
+a Go bridge. Stock data remains weekly CSV closes; fund data is daily NAV.
+See [setup, API examples, version lock and live validation](docs/unified-quotes.md).
+
 Weekly prices, analyst consensus and simple analytics for the SET100.
 
 ## Scripts

@@ -15,3 +15,24 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt pytest
       - run: pytest -q
+
+  sec-bridge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/sec-bridge/go.mod
+          cache-dependency-path: tools/sec-bridge/go.sum
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pytest
+      - name: Verify and test the pinned fork
+        working-directory: tools/sec-bridge
+        run: |
+          go mod verify
+          go test ./...
+          go build -trimpath -o ../../bin/sec-bridge .
+      - name: Test Python and Go transports against a local HTTP server
+        run: pytest -q tests/test_sec_api.py tests/test_quote_service.py

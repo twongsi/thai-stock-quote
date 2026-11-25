@@ -179,14 +179,26 @@ def resolve_fund(client, code: str, active_only: bool = True) -> dict:
     results = search_funds(client, code, limit=30, active_only=active_only)
     if not results and active_only:
         results = search_funds(client, code, limit=30, active_only=False)
+    # SEC project_info may match the project abbreviation but not a share class.
+    # Broaden the search only; selection below must still match the exact request.
+    if not results:
+        base = re.sub(r"\([^)]*\)$", "", code).strip()
+        candidates = [base]
+        if "-" in base:
+            candidates.append(base.rsplit("-", 1)[0])
+        for query in dict.fromkeys(candidates):
+            if query and query != code:
+                results = search_funds(client, query, limit=100, active_only=False)
+                if results:
+                    break
     if not results:
         raise SecApiError(f"ไม่พบกองทุนที่ตรงกับ '{code}' — ลองใส่ชื่อย่อ เช่น K-ATECH หรือ SCBNDQ")
 
     needle = _norm(code)
-    best = results[0]
+    best = None
     matched_class = None
     for fund in results:
-        if _norm(fund["code"]) == needle:
+        if _norm(fund["code"]) == needle or _norm(fund["proj_id"]) == needle:
             best = fund
             break
         for class_name in fund["classes"]:
@@ -195,6 +207,8 @@ def resolve_fund(client, code: str, active_only: bool = True) -> dict:
                 break
         if matched_class:
             break
+    if best is None:
+        raise SecApiError(f"ไม่พบรหัสกองทุนหรือชนิดหน่วยลงทุนที่ตรงกับ '{code}' — โปรดเลือกรหัสจากผลค้นหา")
     if matched_class is None:
         for class_name in best["classes"]:
             if _norm(class_name) == needle:
@@ -243,8 +257,10 @@ def _pick_class(profile_rows: list[dict], nav_rows: list[dict], preferred: str |
         for name in classes:
             if _norm(name) == _norm(preferred):
                 return name, classes
+        raise SecApiError(f"ไม่พบชนิดหน่วยลงทุน '{preferred}' ของกองทุนนี้")
     if nav_classes:
-        return nav_classes[0], classes
+        latest = max(nav_rows, key=lambda row: str(row.get("nav_date") or ""))
+        return latest.get("fund_class_name") or None, classes
     return (classes[0] if classes else None), classes
 
 
@@ -291,7 +307,9 @@ def build_fund_bundle(
     preferred = fund_class_name or fund.get("matched_class")
     chosen_class, class_names = _pick_class(profile_rows, nav_rows_all, preferred)
 
-    nav_rows = [r for r in nav_rows_all if (r.get("fund_class_name") or "") == (chosen_class or "")] or nav_rows_all
+    nav_rows = [r for r in nav_rows_all if (r.get("fund_class_name") or "") == (chosen_class or "")]
+    if not nav_rows:
+        raise SecApiError(f"ไม่มี NAV สำหรับ {code} ชนิดหน่วยลงทุน {chosen_class or 'main'}")
     nav_rows.sort(key=lambda r: str(r.get("nav_date") or ""))
 
     base = next((r for r in profile_rows if (r.get("fund_class_name") or "") == (chosen_class or "")), profile_rows[0] if profile_rows else {})

@@ -100,6 +100,8 @@ def build(client, codes: list[str], out_dir: Path, years: int, risk_free: float,
         started = time.monotonic()
         try:
             bundle = fund_service.build_fund_bundle(client, code, years=years, risk_free=risk_free)
+            if not bundle["history"] or not bundle["latest_nav"]["nav"]:
+                raise SecApiError("ไม่มี NAV ที่ใช้ได้ — ไม่เผยแพร่เป็นข้อมูลจริง")
         except SecApiError as exc:
             failures.append((code, str(exc)))
             print(f"  ✗ {code}: {exc}", file=sys.stderr)
@@ -159,7 +161,7 @@ def build(client, codes: list[str], out_dir: Path, years: int, risk_free: float,
     print(f"\nเขียนไฟล์ลง {out_dir} — {len(index)} กองทุน, รวม {total_bytes / 1024:.0f} KB")
     if failures:
         print(f"มี {len(failures)} กองที่ build ไม่สำเร็จ: " + ", ".join(c for c, _ in failures))
-    return 0 if index else 1
+    return 0 if index and not failures else 1
 
 
 def write_summary(out_dir: Path, meta: dict, index: list[dict], failures: list[tuple[str, str]]) -> None:

@@ -11,3 +11,4 @@ __pycache__/
 fund_dashboard/.env
 fund_dashboard/cache/
 site/
+bin/
